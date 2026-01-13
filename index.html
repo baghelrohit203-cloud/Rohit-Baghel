@@ -3,10 +3,18 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    
+    <!-- Android PWA Support -->
+    <meta name="mobile-web-app-capable" content="yes">
     <meta name="theme-color" content="#0a0a0a">
+    
+    <!-- iOS PWA Support -->
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Karma Chakra">
+    <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/2503/2503529.png">
+
     <title>Karma Chakra 6x4</title>
     <link rel="manifest" href="/manifest.json">
     <script src="https://cdn.tailwindcss.com"></script>
@@ -18,6 +26,8 @@
             color: #e5e5e5;
             overflow-x: hidden;
             -webkit-tap-highlight-color: transparent;
+            overscroll-behavior-y: contain;
+            user-select: none;
         }
         .mono { font-family: 'JetBrains+Mono', monospace; }
         .glass {
@@ -27,16 +37,6 @@
         }
         .active-ring {
             box-shadow: 0 0 15px rgba(59, 130, 246, 0.5);
-        }
-        ::-webkit-scrollbar {
-          width: 6px;
-        }
-        ::-webkit-scrollbar-track {
-          background: transparent;
-        }
-        ::-webkit-scrollbar-thumb {
-          background: #333;
-          border-radius: 10px;
         }
         input[type="date"]::-webkit-calendar-picker-indicator {
             filter: invert(1);
@@ -51,8 +51,8 @@
     "react/": "https://esm.sh/react@^19.2.3/",
     "@google/genai": "https://esm.sh/@google/genai@^1.35.0",
     "recharts": "https://esm.sh/recharts@^3.6.0",
-    "@vitejs/plugin-react": "https://esm.sh/@vitejs/plugin-react@^5.1.2",
-    "vite": "https://esm.sh/vite@^7.3.1"
+    "vite": "https://esm.sh/vite@^7.3.1",
+    "@vitejs/plugin-react": "https://esm.sh/@vitejs/plugin-react@^5.1.2"
   }
 }
 </script>
@@ -63,9 +63,20 @@
     <script>
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('/sw.js');
+                navigator.serviceWorker.register('/sw.js', { scope: '/' })
+                .then(reg => console.log('Service Worker Active', reg.scope))
+                .catch(err => console.log('Service Worker Failed', err));
             });
         }
+        
+        // Block browser context menu to feel more like an app
+        window.oncontextmenu = function(event) {
+             if (event.target.tagName !== 'INPUT' && event.target.tagName !== 'TEXTAREA') {
+                 event.preventDefault();
+                 event.stopPropagation();
+                 return false;
+             }
+        };
     </script>
 </body>
 </html>
