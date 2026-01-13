@@ -394,7 +394,16 @@ const App: React.FC = () => {
             {reportData.length > 0 ? (
               <div className="h-64">
                 <ResponsiveContainer width="100%" height="100%">
-                  <PieChart><Pie data={reportData} innerRadius={60} outerRadius={85} paddingAngle={8} dataKey="value">{reportData.map((e, i) => <Cell key={`c-${i}`} fill={ACTIVITY_COLORS[e.name as ActivityType]} stroke="none" />)}</Pie><Tooltip contentStyle={{ backgroundColor: '#171717', border: '1px solid #333', borderRadius: '16px' }} itemStyle={{ color: '#fff', fontSize: '12px' }} formatter={(v: number) => [`${v} mins`, 'Intensity']} /></PieChart>
+                  <PieChart>
+                    <Pie data={reportData} innerRadius={60} outerRadius={85} paddingAngle={8} dataKey="value">
+                      {reportData.map((e, i) => <Cell key={`c-${i}`} fill={ACTIVITY_COLORS[e.name as ActivityType]} stroke="none" />)}
+                    </Pie>
+                    <Tooltip 
+                      contentStyle={{ backgroundColor: '#171717', border: '1px solid #333', borderRadius: '16px' }} 
+                      itemStyle={{ color: '#fff', fontSize: '12px' }} 
+                      formatter={(v: any) => [`${v} mins`, 'Intensity']} 
+                    />
+                  </PieChart>
                 </ResponsiveContainer>
               </div>
             ) : <div className="py-20 text-center text-xs tracking-widest text-gray-600 uppercase">Cycle empty for this interval</div>}
