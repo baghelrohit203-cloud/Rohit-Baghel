@@ -1,19 +1,26 @@
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { ActivityEntry, ActivityType, ActivityStatus, AppState, ReportInterval } from './types';
-import { ACTIVITY_TYPES, ACTIVITY_COLORS } from './constants';
+import { ActivityEntry, ActivityType, ActivityStatus, AppState, ReportInterval, Note, NoteType } from './types';
+import { ACTIVITY_TYPES, ACTIVITY_COLORS, NOTE_TYPES, NOTE_COLORS } from './constants';
 import ActivityItem from './components/ActivityItem';
 import ActivityModal from './components/ActivityModal';
+import NoteModal from './components/NoteModal';
+import NoteCard from './components/NoteCard';
 import { getProductivityAnalysis } from './services/geminiService';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
 
 const App: React.FC = () => {
   const [activities, setActivities] = useState<ActivityEntry[]>([]);
+  const [notes, setNotes] = useState<Note[]>([]);
   const [currentView, setCurrentView] = useState<AppState['currentView']>('dashboard');
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
   const [reportInterval, setReportInterval] = useState<ReportInterval>('Daily');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingActivity, setEditingActivity] = useState<ActivityEntry | null>(null);
+  const [editingNote, setEditingNote] = useState<Note | null>(null);
+  const [isNoteModalOpen, setIsNoteModalOpen] = useState(false);
+  const [noteFilter, setNoteFilter] = useState<NoteType | 'All'>('All');
+  
   const [currentTime, setCurrentTime] = useState(new Date());
   const [coachResponse, setCoachResponse] = useState<string | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
@@ -23,22 +30,28 @@ const App: React.FC = () => {
   const alarmIntervalRef = useRef<number | null>(null);
 
   useEffect(() => {
-    const saved = localStorage.getItem('karma_chakra_v6_tracking');
-    if (saved) setActivities(JSON.parse(saved));
+    const savedActivities = localStorage.getItem('karma_chakra_v6_activities');
+    const savedNotes = localStorage.getItem('karma_chakra_v6_notes');
+    if (savedActivities) setActivities(JSON.parse(savedActivities));
+    if (savedNotes) setNotes(JSON.parse(savedNotes));
+    
     const timer = setInterval(() => setCurrentTime(new Date()), 1000);
     return () => clearInterval(timer);
   }, []);
 
   useEffect(() => {
-    localStorage.setItem('karma_chakra_v6_tracking', JSON.stringify(activities));
+    localStorage.setItem('karma_chakra_v6_activities', JSON.stringify(activities));
   }, [activities]);
+
+  useEffect(() => {
+    localStorage.setItem('karma_chakra_v6_notes', JSON.stringify(notes));
+  }, [notes]);
 
   // Alarm checking logic
   useEffect(() => {
     const todayStr = currentTime.toISOString().split('T')[0];
     const currentHM = `${currentTime.getHours().toString().padStart(2, '0')}:${currentTime.getMinutes().toString().padStart(2, '0')}`;
     
-    // Check for any task scheduled for NOW that hasn't been started/completed and has alarm enabled
     const trigger = activities.find(a => 
       a.date === todayStr && 
       a.startTime === currentHM && 
@@ -100,6 +113,30 @@ const App: React.FC = () => {
     }
   };
 
+  const handleSaveNote = (title: string, content: string, type: NoteType) => {
+    if (editingNote) {
+      setNotes(prev => prev.map(n => n.id === editingNote.id ? { ...n, title, content, type, updatedAt: Date.now() } : n));
+    } else {
+      const newNote: Note = {
+        id: Math.random().toString(36).substr(2, 9),
+        title,
+        content,
+        type,
+        createdAt: Date.now(),
+        updatedAt: Date.now()
+      };
+      setNotes(prev => [newNote, ...prev]);
+    }
+    setEditingNote(null);
+    setIsNoteModalOpen(false);
+  };
+
+  const handleDeleteNote = (id: string) => {
+    setNotes(prev => prev.filter(n => n.id !== id));
+    setEditingNote(null);
+    setIsNoteModalOpen(false);
+  };
+
   const stats = useMemo(() => {
     const currentMins = currentTime.getHours() * 60 + currentTime.getMinutes();
     const totalMins = 24 * 60;
@@ -141,18 +178,13 @@ const App: React.FC = () => {
     }
 
     if (editingActivity) {
-      setActivities(prev => {
-        const updated = prev.map(a => {
-          if (a.id === editingActivity.id) {
-            return { ...a, type, description, estimatedDuration: duration, overtime, startTime, alarmEnabled };
-          }
-          if (repeatMode !== 'none' && datesToSync.includes(a.date) && a.description === editingActivity.description && a.type === editingActivity.type) {
-            return { ...a, type, description, estimatedDuration: duration, overtime, startTime, alarmEnabled };
-          }
-          return a;
-        });
-        return updated;
-      });
+      setActivities(prev => prev.map(a => {
+        if (a.id === editingActivity.id) return { ...a, type, description, estimatedDuration: duration, overtime, startTime, alarmEnabled };
+        if (repeatMode !== 'none' && datesToSync.includes(a.date) && a.description === editingActivity.description && a.type === editingActivity.type) {
+           return { ...a, type, description, estimatedDuration: duration, overtime, startTime, alarmEnabled };
+        }
+        return a;
+      }));
       setEditingActivity(null);
     } else {
       const newEntries: ActivityEntry[] = datesToSync.map(date => ({
@@ -172,18 +204,7 @@ const App: React.FC = () => {
   };
 
   const handleMoveToDate = (id: string, newDate: string) => {
-    setActivities(prev => prev.map(a => {
-      if (a.id === id) {
-        return { 
-          ...a, 
-          date: newDate, 
-          status: 'Rescheduled', 
-          movedFromDate: a.date, 
-          movedAt: Date.now() 
-        };
-      }
-      return a;
-    }));
+    setActivities(prev => prev.map(a => a.id === id ? { ...a, date: newDate, status: 'Rescheduled', movedFromDate: a.date, movedAt: Date.now() } : a));
   };
 
   const handleUpdateTimer = (id: string, elapsed: number, isActive: boolean) => {
@@ -192,20 +213,18 @@ const App: React.FC = () => {
         const othersElapsed = (a.timer.totalElapsed || 0) + (Date.now() - (a.timer.lastStartTime || 0));
         return { ...a, timer: { isActive: false, totalElapsed: othersElapsed, lastStartTime: null }};
       }
-      if (a.id === id) {
-        return {
-          ...a, timer: { 
-            isActive, 
-            totalElapsed: elapsed, 
-            lastStartTime: isActive ? Date.now() : null 
-          }
-        };
-      }
+      if (a.id === id) return { ...a, timer: { isActive, totalElapsed: elapsed, lastStartTime: isActive ? Date.now() : null } };
       return a;
     }));
   };
 
   const dashboardActivities = useMemo(() => activities.filter(a => a.date === selectedDate), [activities, selectedDate]);
+  
+  const filteredNotes = useMemo(() => {
+    if (noteFilter === 'All') return notes;
+    return notes.filter(n => n.type === noteFilter);
+  }, [notes, noteFilter]);
+
   const completionRate = useMemo(() => {
     if (dashboardActivities.length === 0) return 0;
     const completed = dashboardActivities.filter(a => a.status === 'Completed').length;
@@ -268,18 +287,8 @@ const App: React.FC = () => {
               </div>
            </div>
            <div className="flex flex-col w-full gap-4 mt-12 max-w-[280px]">
-              <button 
-                onClick={startTaskFromAlarm}
-                className="w-full py-6 bg-white text-blue-600 font-black rounded-3xl text-lg shadow-2xl active:scale-95 transition-all"
-              >
-                START NOW
-              </button>
-              <button 
-                onClick={dismissAlarm}
-                className="w-full py-4 bg-white/10 text-white font-bold rounded-2xl hover:bg-white/20 transition-all text-sm uppercase tracking-widest"
-              >
-                Dismiss Alarm
-              </button>
+              <button onClick={startTaskFromAlarm} className="w-full py-6 bg-white text-blue-600 font-black rounded-3xl text-lg shadow-2xl active:scale-95 transition-all">START NOW</button>
+              <button onClick={dismissAlarm} className="w-full py-4 bg-white/10 text-white font-bold rounded-2xl hover:bg-white/20 transition-all text-sm uppercase tracking-widest">Dismiss Alarm</button>
            </div>
         </div>
       )}
@@ -350,6 +359,49 @@ const App: React.FC = () => {
           </>
         )}
 
+        {currentView === 'scribe' && (
+          <div className="space-y-6 animate-in fade-in duration-500">
+            <div className="flex items-center justify-between">
+               <h2 className="text-2xl font-black text-white tracking-tighter italic uppercase">Dharma Scribe</h2>
+               <button 
+                 onClick={() => { setEditingNote(null); setIsNoteModalOpen(true); }} 
+                 className="p-3 bg-blue-600 text-white rounded-2xl shadow-xl active:scale-95 transition-all"
+               >
+                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+               </button>
+            </div>
+
+            <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
+              {['All', ...NOTE_TYPES].map(type => (
+                <button
+                  key={type}
+                  onClick={() => setNoteFilter(type as any)}
+                  className={`px-4 py-2 text-[10px] font-black rounded-full border whitespace-nowrap uppercase tracking-tighter transition-all ${
+                    noteFilter === type ? 'bg-white text-black border-white' : 'bg-white/5 text-gray-500 border-white/5 hover:border-white/20'
+                  }`}
+                >
+                  {type}
+                </button>
+              ))}
+            </div>
+
+            <div className="grid grid-cols-1 gap-4">
+              {filteredNotes.map(note => (
+                <NoteCard 
+                  key={note.id} 
+                  note={note} 
+                  onClick={(n) => { setEditingNote(n); setIsNoteModalOpen(true); }} 
+                />
+              ))}
+              {filteredNotes.length === 0 && (
+                <div className="py-20 text-center glass rounded-3xl border-dashed border-white/5 opacity-50 text-[10px] font-black uppercase tracking-[0.3em] text-gray-600">
+                   The scroll is empty...
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
         {currentView === 'backlog' && (
           <div className="space-y-6">
             <div className="glass p-6 rounded-3xl border border-blue-500/20">
@@ -398,11 +450,7 @@ const App: React.FC = () => {
                     <Pie data={reportData} innerRadius={60} outerRadius={85} paddingAngle={8} dataKey="value">
                       {reportData.map((e, i) => <Cell key={`c-${i}`} fill={ACTIVITY_COLORS[e.name as ActivityType]} stroke="none" />)}
                     </Pie>
-                    <Tooltip 
-                      contentStyle={{ backgroundColor: '#171717', border: '1px solid #333', borderRadius: '16px' }} 
-                      itemStyle={{ color: '#fff', fontSize: '12px' }} 
-                      formatter={(v: any) => [`${v} mins`, 'Intensity']} 
-                    />
+                    <Tooltip contentStyle={{ backgroundColor: '#171717', border: '1px solid #333', borderRadius: '16px' }} itemStyle={{ color: '#fff', fontSize: '12px' }} formatter={(v: any) => [`${v} mins`, 'Intensity']} />
                   </PieChart>
                 </ResponsiveContainer>
               </div>
@@ -425,6 +473,10 @@ const App: React.FC = () => {
           <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M3 9h18"/><path d="M9 21V9"/></svg>
           <span className="text-[9px] font-black uppercase tracking-widest">Karma</span>
         </button>
+        <button onClick={() => setCurrentView('scribe')} className={`flex flex-col items-center gap-2 transition-all ${currentView === 'scribe' ? 'text-blue-400 scale-110' : 'text-gray-700'}`}>
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+          <span className="text-[9px] font-black uppercase tracking-widest">Scribe</span>
+        </button>
         <button onClick={() => setCurrentView('backlog')} className={`flex flex-col items-center gap-2 transition-all ${currentView === 'backlog' ? 'text-orange-500 scale-110' : 'text-gray-700'}`}>
           <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
           <span className="text-[9px] font-black uppercase tracking-widest">Backlog</span>
@@ -444,6 +496,15 @@ const App: React.FC = () => {
           initialData={editingActivity}
           onClose={() => { setIsModalOpen(false); setEditingActivity(null); }} 
           onSave={handleAddOrEditActivity} 
+        />
+      )}
+
+      {(isNoteModalOpen || editingNote) && (
+        <NoteModal 
+          initialData={editingNote}
+          onClose={() => { setIsNoteModalOpen(false); setEditingNote(null); }}
+          onSave={handleSaveNote}
+          onDelete={handleDeleteNote}
         />
       )}
     </div>

@@ -1,5 +1,5 @@
 
-import { ActivityType, TimeBlock } from './types';
+import { ActivityType, TimeBlock, NoteType } from './types';
 
 export const ACTIVITY_TYPES: ActivityType[] = ['Work', 'Study', 'Home', 'Sleep', 'Workout', 'Other'];
 
@@ -12,7 +12,15 @@ export const ACTIVITY_COLORS: Record<ActivityType, string> = {
   Other: '#ec4899',   // Pink/Magenta
 };
 
-// Added BLOCKS constant defining the six 4-hour cycles (6x4 = 24 hours) for the Karma Chakra structure
+export const NOTE_TYPES: NoteType[] = ['Journal', 'Planner', 'Reflection', 'Idea'];
+
+export const NOTE_COLORS: Record<NoteType, string> = {
+  Journal: '#8b5cf6',    // Purple
+  Planner: '#3b82f6',    // Blue
+  Reflection: '#10b981', // Emerald
+  Idea: '#f59e0b',       // Gold
+};
+
 export const BLOCKS: TimeBlock[] = [
   { id: 1, label: 'Brahma Muhurta', startTime: '04:00', endTime: '08:00' },
   { id: 2, label: 'Pratah', startTime: '08:00', endTime: '12:00' },

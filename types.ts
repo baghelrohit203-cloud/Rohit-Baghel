@@ -3,6 +3,8 @@ export type ActivityType = 'Work' | 'Study' | 'Home' | 'Sleep' | 'Workout' | 'Ot
 export type ActivityStatus = 'Pending' | 'Completed' | 'Rescheduled';
 export type ReportInterval = 'Daily' | 'Weekly' | 'Monthly' | 'Quarterly' | 'Half-Yearly' | 'Yearly';
 
+export type NoteType = 'Journal' | 'Planner' | 'Reflection' | 'Idea';
+
 export interface TimeBlock {
   id: number;
   label: string;
@@ -14,6 +16,15 @@ export interface TimerState {
   isActive: boolean;
   lastStartTime: number | null;
   totalElapsed: number; // in milliseconds
+}
+
+export interface Note {
+  id: string;
+  title: string;
+  content: string;
+  type: NoteType;
+  createdAt: number;
+  updatedAt: number;
 }
 
 export interface ActivityEntry {
@@ -36,7 +47,8 @@ export interface ActivityEntry {
 
 export interface AppState {
   activities: ActivityEntry[];
-  currentView: 'dashboard' | 'stats' | 'coach' | 'backlog';
+  notes: Note[];
+  currentView: 'dashboard' | 'stats' | 'coach' | 'backlog' | 'scribe';
   selectedDate: string;
   reportInterval: ReportInterval;
 }
