@@ -3,7 +3,7 @@ export type ActivityType = 'Work' | 'Study' | 'Home' | 'Sleep' | 'Workout' | 'Ot
 export type ActivityStatus = 'Pending' | 'Completed' | 'Rescheduled';
 export type ReportInterval = 'Daily' | 'Weekly' | 'Monthly' | 'Quarterly' | 'Half-Yearly' | 'Yearly';
 
-export type NoteType = 'Journal' | 'Planner' | 'Reflection' | 'Idea';
+export type NoteType = 'Journal' | 'Planner' | 'Reflection' | 'Idea' | 'Current Project';
 
 export interface TimeBlock {
   id: number;
@@ -18,12 +18,20 @@ export interface TimerState {
   totalElapsed: number; // in milliseconds
 }
 
+export interface ProjectBlock {
+  id: string;
+  topic: string;
+  content: string;
+  timestamp: number;
+}
+
 export interface Note {
   id: string;
   title: string;
   content: string;
   type: NoteType;
   project?: string;
+  blocks?: ProjectBlock[]; // Specifically for Current Project type
   createdAt: number;
   updatedAt: number;
 }

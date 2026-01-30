@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { ActivityEntry, ActivityType, ActivityStatus, AppState, ReportInterval, Note, NoteType } from './types';
+import { ActivityEntry, ActivityType, ActivityStatus, AppState, ReportInterval, Note, NoteType, ProjectBlock } from './types';
 import { ACTIVITY_TYPES, ACTIVITY_COLORS, NOTE_TYPES, NOTE_COLORS } from './constants';
 import ActivityItem from './components/ActivityItem';
 import ActivityModal from './components/ActivityModal';
@@ -113,9 +113,9 @@ const App: React.FC = () => {
     }
   };
 
-  const handleSaveNote = (title: string, content: string, type: NoteType, project?: string) => {
+  const handleSaveNote = (title: string, content: string, type: NoteType, project?: string, blocks?: ProjectBlock[]) => {
     if (editingNote) {
-      setNotes(prev => prev.map(n => n.id === editingNote.id ? { ...n, title, content, type, project, updatedAt: Date.now() } : n));
+      setNotes(prev => prev.map(n => n.id === editingNote.id ? { ...n, title, content, type, project, blocks, updatedAt: Date.now() } : n));
     } else {
       const newNote: Note = {
         id: Math.random().toString(36).substr(2, 9),
@@ -123,6 +123,7 @@ const App: React.FC = () => {
         content,
         type,
         project,
+        blocks,
         createdAt: Date.now(),
         updatedAt: Date.now()
       };

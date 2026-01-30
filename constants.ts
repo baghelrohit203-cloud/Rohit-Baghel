@@ -12,13 +12,14 @@ export const ACTIVITY_COLORS: Record<ActivityType, string> = {
   Other: '#ec4899',   // Pink/Magenta
 };
 
-export const NOTE_TYPES: NoteType[] = ['Journal', 'Planner', 'Reflection', 'Idea'];
+export const NOTE_TYPES: NoteType[] = ['Journal', 'Planner', 'Reflection', 'Idea', 'Current Project'];
 
 export const NOTE_COLORS: Record<NoteType, string> = {
-  Journal: '#8b5cf6',    // Purple
-  Planner: '#3b82f6',    // Blue
-  Reflection: '#10b981', // Emerald
-  Idea: '#f59e0b',       // Gold
+  Journal: '#8b5cf6',         // Purple
+  Planner: '#3b82f6',         // Blue
+  Reflection: '#10b981',      // Emerald
+  Idea: '#f59e0b',            // Gold
+  'Current Project': '#06b6d4' // Cyan
 };
 
 export const BLOCKS: TimeBlock[] = [
