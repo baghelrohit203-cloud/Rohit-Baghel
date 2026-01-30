@@ -62,12 +62,17 @@ const ActivityItem: React.FC<ActivityItemProps> = ({ activity, onUpdateStatus, o
     <div className={`p-4 rounded-2xl transition-all duration-300 glass ${isDone ? 'opacity-60 bg-white/5' : 'bg-white/[0.02]'} ${isUrgent && !isDone ? 'border-orange-500 shadow-[0_0_15px_rgba(249,115,22,0.3)]' : 'border-white/5'}`}>
       <div className="flex justify-between items-start mb-2">
         <div className="flex-1">
-          <div className="flex items-center justify-between mb-1 pr-2">
+          <div className="flex items-center justify-between mb-2 pr-2">
             <div className="flex items-center gap-2">
               <div className="w-2 h-2 rounded-full" style={{ backgroundColor: isUrgent && !isDone ? '#f97316' : ACTIVITY_COLORS[activity.type] }} />
               <span className={`text-[10px] font-black uppercase tracking-widest ${isDone ? 'text-gray-500' : isUrgent ? 'text-orange-500' : 'text-blue-400'}`}>
                 {activity.type} {isUrgent && !isDone && "— URGENT"}
               </span>
+              {activity.project && (
+                <span className="text-[9px] mono font-bold text-gray-500 px-1.5 py-0.5 border border-white/5 rounded lowercase">
+                  #{activity.project}
+                </span>
+              )}
             </div>
             {activity.startTime && (
               <div className="flex items-center gap-1.5 opacity-80">

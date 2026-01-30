@@ -113,15 +113,16 @@ const App: React.FC = () => {
     }
   };
 
-  const handleSaveNote = (title: string, content: string, type: NoteType) => {
+  const handleSaveNote = (title: string, content: string, type: NoteType, project?: string) => {
     if (editingNote) {
-      setNotes(prev => prev.map(n => n.id === editingNote.id ? { ...n, title, content, type, updatedAt: Date.now() } : n));
+      setNotes(prev => prev.map(n => n.id === editingNote.id ? { ...n, title, content, type, project, updatedAt: Date.now() } : n));
     } else {
       const newNote: Note = {
         id: Math.random().toString(36).substr(2, 9),
         title,
         content,
         type,
+        project,
         createdAt: Date.now(),
         updatedAt: Date.now()
       };
@@ -158,6 +159,7 @@ const App: React.FC = () => {
     duration: number, 
     overtime: number, 
     repeatMode: 'none' | 'weekdays' | 'weekends',
+    project?: string,
     startTime?: string,
     alarmEnabled?: boolean
   ) => {
@@ -179,9 +181,9 @@ const App: React.FC = () => {
 
     if (editingActivity) {
       setActivities(prev => prev.map(a => {
-        if (a.id === editingActivity.id) return { ...a, type, description, estimatedDuration: duration, overtime, startTime, alarmEnabled };
+        if (a.id === editingActivity.id) return { ...a, type, description, project, estimatedDuration: duration, overtime, startTime, alarmEnabled };
         if (repeatMode !== 'none' && datesToSync.includes(a.date) && a.description === editingActivity.description && a.type === editingActivity.type) {
-           return { ...a, type, description, estimatedDuration: duration, overtime, startTime, alarmEnabled };
+           return { ...a, type, description, project, estimatedDuration: duration, overtime, startTime, alarmEnabled };
         }
         return a;
       }));
@@ -189,7 +191,7 @@ const App: React.FC = () => {
     } else {
       const newEntries: ActivityEntry[] = datesToSync.map(date => ({
         id: Math.random().toString(36).substr(2, 9),
-        date, type, description, timestamp: Date.now(),
+        date, type, description, project, timestamp: Date.now(),
         estimatedDuration: duration, overtime: overtime, status: 'Pending',
         timer: { isActive: false, lastStartTime: null, totalElapsed: 0 },
         startTime, alarmEnabled

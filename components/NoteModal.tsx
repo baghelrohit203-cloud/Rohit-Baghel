@@ -6,13 +6,14 @@ import { NOTE_TYPES, NOTE_COLORS } from '../constants';
 interface NoteModalProps {
   initialData?: Note | null;
   onClose: () => void;
-  onSave: (title: string, content: string, type: NoteType) => void;
+  onSave: (title: string, content: string, type: NoteType, project?: string) => void;
   onDelete?: (id: string) => void;
 }
 
 const NoteModal: React.FC<NoteModalProps> = ({ initialData, onClose, onSave, onDelete }) => {
   const [title, setTitle] = useState('');
   const [content, setContent] = useState('');
+  const [project, setProject] = useState('');
   const [type, setType] = useState<NoteType>('Journal');
 
   useEffect(() => {
@@ -20,6 +21,7 @@ const NoteModal: React.FC<NoteModalProps> = ({ initialData, onClose, onSave, onD
       setTitle(initialData.title);
       setContent(initialData.content);
       setType(initialData.type);
+      setProject(initialData.project || '');
     }
   }, [initialData]);
 
@@ -39,7 +41,7 @@ const NoteModal: React.FC<NoteModalProps> = ({ initialData, onClose, onSave, onD
              </button>
            )}
            <button 
-             onClick={() => onSave(title, content, type)}
+             onClick={() => onSave(title, content, type, project)}
              disabled={!title.trim() || !content.trim()}
              className="px-6 py-2 bg-blue-600 text-white text-xs font-black rounded-xl hover:bg-blue-500 transition-all uppercase tracking-widest disabled:opacity-30"
            >
@@ -49,21 +51,31 @@ const NoteModal: React.FC<NoteModalProps> = ({ initialData, onClose, onSave, onD
       </header>
 
       <div className="flex-1 overflow-y-auto p-6 space-y-8 max-w-2xl mx-auto w-full">
-        <div className="flex flex-wrap gap-2 justify-center">
-          {NOTE_TYPES.map(t => (
-            <button
-              key={t}
-              onClick={() => setType(t)}
-              className={`px-4 py-2 text-[10px] font-black rounded-full border transition-all uppercase tracking-tighter ${
-                type === t 
-                  ? 'text-white border-transparent' 
-                  : 'bg-white/5 border-white/5 text-gray-500'
-              }`}
-              style={type === t ? { backgroundColor: NOTE_COLORS[t] } : {}}
-            >
-              {t}
-            </button>
-          ))}
+        <div className="flex flex-col items-center gap-6">
+          <div className="flex flex-wrap gap-2 justify-center">
+            {NOTE_TYPES.map(t => (
+              <button
+                key={t}
+                onClick={() => setType(t)}
+                className={`px-4 py-2 text-[10px] font-black rounded-full border transition-all uppercase tracking-tighter ${
+                  type === t 
+                    ? 'text-white border-transparent' 
+                    : 'bg-white/5 border-white/5 text-gray-500'
+                }`}
+                style={type === t ? { backgroundColor: NOTE_COLORS[t] } : {}}
+              >
+                {t}
+              </button>
+            ))}
+          </div>
+          
+          <input
+            type="text"
+            value={project}
+            onChange={(e) => setProject(e.target.value)}
+            placeholder="#project-tag"
+            className="bg-white/5 border border-white/5 px-4 py-1.5 rounded-full text-xs mono font-bold text-gray-500 focus:outline-none focus:ring-1 focus:ring-blue-500/50 placeholder:text-gray-800 lowercase tracking-widest"
+          />
         </div>
 
         <input

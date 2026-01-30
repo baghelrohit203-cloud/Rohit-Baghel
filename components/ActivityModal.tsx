@@ -12,6 +12,7 @@ interface ActivityModalProps {
     duration: number, 
     overtime: number, 
     repeatMode: 'none' | 'weekdays' | 'weekends',
+    project?: string,
     startTime?: string,
     alarmEnabled?: boolean
   ) => void;
@@ -20,6 +21,7 @@ interface ActivityModalProps {
 const ActivityModal: React.FC<ActivityModalProps> = ({ initialData, onClose, onSave }) => {
   const [type, setType] = useState<ActivityType>('Work');
   const [description, setDescription] = useState('');
+  const [project, setProject] = useState('');
   const [duration, setDuration] = useState('30');
   const [overtime, setOvertime] = useState('0');
   const [repeatMode, setRepeatMode] = useState<'none' | 'weekdays' | 'weekends'>('none');
@@ -30,6 +32,7 @@ const ActivityModal: React.FC<ActivityModalProps> = ({ initialData, onClose, onS
     if (initialData) {
       setType(initialData.type);
       setDescription(initialData.description);
+      setProject(initialData.project || '');
       setDuration(initialData.estimatedDuration.toString());
       setOvertime(initialData.overtime.toString());
       setStartTime(initialData.startTime || '');
@@ -46,7 +49,7 @@ const ActivityModal: React.FC<ActivityModalProps> = ({ initialData, onClose, onS
         
         <div className="space-y-6">
           <div>
-            <label className="block text-[10px] uppercase text-gray-500 font-black mb-3 tracking-[0.2em] text-center">Type</label>
+            <label className="block text-[10px] uppercase text-gray-500 font-black mb-3 tracking-[0.2em] text-center">Category</label>
             <div className="grid grid-cols-3 gap-2">
               {ACTIVITY_TYPES.map(t => (
                 <button
@@ -65,15 +68,28 @@ const ActivityModal: React.FC<ActivityModalProps> = ({ initialData, onClose, onS
             </div>
           </div>
 
-          <div className="space-y-1">
-            <label className="block text-[10px] uppercase text-gray-500 font-black mb-2 tracking-[0.2em]">Activity Details</label>
-            <input
-              type="text"
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              placeholder="Ex: Study advanced React patterns"
-              className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-4 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 text-white font-medium placeholder:text-gray-700"
-            />
+          <div className="space-y-4">
+            <div className="space-y-1">
+              <label className="block text-[10px] uppercase text-gray-500 font-black mb-2 tracking-[0.2em]">Project / Tag</label>
+              <input
+                type="text"
+                value={project}
+                onChange={(e) => setProject(e.target.value)}
+                placeholder="Ex: Website Project, Fitness, Side-Hustle"
+                className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 text-blue-400 mono font-bold placeholder:text-gray-800"
+              />
+            </div>
+
+            <div className="space-y-1">
+              <label className="block text-[10px] uppercase text-gray-500 font-black mb-2 tracking-[0.2em]">Activity Details</label>
+              <input
+                type="text"
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                placeholder="Ex: Study advanced React patterns"
+                className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-4 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 text-white font-medium placeholder:text-gray-700"
+              />
+            </div>
           </div>
 
           <div className="grid grid-cols-2 gap-4">
@@ -126,7 +142,7 @@ const ActivityModal: React.FC<ActivityModalProps> = ({ initialData, onClose, onS
           </div>
 
           <div className="p-4 bg-white/5 rounded-2xl border border-white/5">
-            <label className="block text-[10px] uppercase text-gray-500 font-black mb-4 tracking-[0.2em]">Batch Sync (Weekday/Weekend)</label>
+            <label className="block text-[10px] uppercase text-gray-500 font-black mb-4 tracking-[0.2em]">Batch Sync (Repeat Mode)</label>
             <div className="flex gap-6">
               <label className="flex items-center gap-3 cursor-pointer group">
                 <input 
@@ -164,7 +180,7 @@ const ActivityModal: React.FC<ActivityModalProps> = ({ initialData, onClose, onS
             Discard
           </button>
           <button 
-            onClick={() => onSave(type, description, parseInt(duration) || 0, parseInt(overtime) || 0, repeatMode, startTime, alarmEnabled)}
+            onClick={() => onSave(type, description, parseInt(duration) || 0, parseInt(overtime) || 0, repeatMode, project, startTime, alarmEnabled)}
             disabled={!description.trim()}
             className="flex-[2] py-4 bg-white text-black font-black rounded-2xl transition-all disabled:opacity-50 disabled:cursor-not-allowed uppercase tracking-widest text-[10px] shadow-xl shadow-white/10 active:scale-95"
           >

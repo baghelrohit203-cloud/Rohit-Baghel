@@ -23,6 +23,7 @@ export interface Note {
   title: string;
   content: string;
   type: NoteType;
+  project?: string;
   createdAt: number;
   updatedAt: number;
 }
@@ -31,6 +32,7 @@ export interface ActivityEntry {
   id: string;
   date: string; // YYYY-MM-DD
   type: ActivityType;
+  project?: string;
   description: string;
   timestamp: number;
   estimatedDuration: number; // minutes
