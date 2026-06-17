@@ -7,11 +7,11 @@
     
     <!-- Android PWA Support -->
     <meta name="mobile-web-app-capable" content="yes">
-    <meta name="theme-color" content="#0a0a0a">
+    <meta name="theme-color" content="#f5f2ea">
     
     <!-- iOS PWA Support -->
     <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="apple-mobile-web-app-title" content="Karma Chakra">
     <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/2503/2503529.png">
 
@@ -20,27 +20,139 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
     <style>
+        :root {
+            --bg-app: #f5f2ea;
+            --text-primary: #2b2925;
+            --text-muted: #78716c;
+            --glass-bg: rgba(255, 255, 255, 0.85);
+            --glass-border: rgba(43, 41, 37, 0.08);
+            --glass-shadow: 0 4px 24px -4px rgba(43, 41, 37, 0.04), inset 0 1px 0 rgba(255, 255, 255, 0.6);
+            --border-stone: rgba(43, 41, 37, 0.08);
+            --bg-stone: #faf8f5;
+            --bg-stone-item: #ffffff;
+            --bg-stone-50: #faf8f5;
+            --border-stone-divider: #e4e1d9;
+            --chart-grid: #e4e1d9;
+            --text-muted-more: #a39d8f;
+            --chart-grid-hover: rgba(194,94,45,0.03);
+        }
+        
+        body.dark {
+            --bg-app: #0a0a0a;
+            --text-primary: #e5e5e5;
+            --text-muted: #a3a3a3;
+            --glass-bg: rgba(23, 23, 23, 0.7);
+            --glass-border: rgba(255, 255, 255, 0.1);
+            --glass-shadow: 0 4px 24px -4px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+            --border-stone: rgba(255, 255, 255, 0.08);
+            --bg-stone: #121212;
+            --bg-stone-item: rgba(255, 255, 255, 0.02);
+            --bg-stone-50: rgba(255, 255, 255, 0.02);
+            --border-stone-divider: rgba(255, 255, 255, 0.05);
+            --chart-grid: #333333;
+            --text-muted-more: #2b2925;
+            --chart-grid-hover: rgba(255, 255, 255, 0.02);
+        }
+
         body {
             font-family: 'Inter', sans-serif;
-            background-color: #0a0a0a;
-            color: #e5e5e5;
+            background-color: var(--bg-app);
+            color: var(--text-primary);
             overflow-x: hidden;
             -webkit-tap-highlight-color: transparent;
             overscroll-behavior-y: contain;
             user-select: none;
+            transition: background-color 0.3s ease, color 0.3s ease;
         }
-        .mono { font-family: 'JetBrains+Mono', monospace; }
+        .mono { font-family: 'JetBrains Mono', monospace; }
         .glass {
-            background: rgba(23, 23, 23, 0.7);
-            backdrop-filter: blur(12px);
-            border: 1px solid rgba(255, 255, 255, 0.1);
+            background: var(--glass-bg);
+            backdrop-filter: blur(16px);
+            border: 1px solid var(--glass-border);
+            box-shadow: var(--glass-shadow);
+            transition: background-color 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease;
         }
         .active-ring {
-            box-shadow: 0 0 15px rgba(59, 130, 246, 0.5);
+            box-shadow: 0 0 15px rgba(194, 94, 45, 0.15);
+            border-color: #c25e2d !important;
         }
         input[type="date"]::-webkit-calendar-picker-indicator {
-            filter: invert(1);
+            filter: grayscale(1) opacity(0.6);
             cursor: pointer;
+        }
+        body.dark input[type="date"]::-webkit-calendar-picker-indicator {
+            filter: invert(1);
+        }
+
+        /* Responsive Overrides for dark mode */
+        body.dark .text-\[\#2b2925\] {
+             color: #e5e5e5 !important;
+        }
+        body.dark .text-stone-700 {
+             color: #e5e5e5 !important;
+        }
+        body.dark .text-stone-500 {
+             color: #a3a3a3 !important;
+        }
+        body.dark .text-stone-400 {
+             color: #838383 !important;
+        }
+        body.dark .text-stone-300 {
+             color: #555555 !important;
+        }
+        body.dark .bg-stone-50 {
+             background-color: rgba(255, 255, 255, 0.03) !important;
+        }
+        body.dark .bg-[#faf8f5] {
+             background-color: #121212 !important;
+        }
+        body.dark .bg-stone-100 {
+             background-color: rgba(255, 255, 255, 0.04) !important;
+        }
+        body.dark .bg-white\/95 {
+             background-color: rgba(23, 23, 23, 0.8) !important;
+        }
+        body.dark .bg-\[\#faf8f5\] {
+             background-color: #121212 !important;
+        }
+        body.dark .bg-\[\#faf8f5\]\/96 {
+             background-color: rgba(10, 10, 10, 0.96) !important;
+        }
+        body.dark .bg-\[\#f5f2ea\] {
+             background-color: #0a0a0a !important;
+        }
+        body.dark .bg-\[\#f5f2ea\]\/90 {
+             background-color: rgba(10, 10, 10, 0.9) !important;
+        }
+        body.dark .border-stone-100 {
+             border-color: rgba(255, 255, 255, 0.05) !important;
+        }
+        body.dark .border-stone-200\/40 {
+             border-color: rgba(255, 255, 255, 0.06) !important;
+        }
+        body.dark .border-stone-200\/60 {
+             border-color: rgba(255, 255, 255, 0.06) !important;
+        }
+        body.dark .border-stone-200\/80 {
+             border-color: rgba(255, 255, 255, 0.06) !important;
+        }
+        body.dark .border-stone-200 {
+             border-color: rgba(255, 255, 255, 0.06) !important;
+        }
+        body.dark .hover\:bg-stone-100:hover {
+             background-color: rgba(255, 255, 255, 0.06) !important;
+        }
+        body.dark .hover\:bg-stone-200:hover {
+             background-color: rgba(255, 255, 255, 0.09) !important;
+        }
+        body.dark .bg-white {
+             background-color: rgba(255, 255, 255, 0.04) !important;
+        }
+        body.dark .bg-white\/5 {
+             background-color: rgba(255, 255, 255, 0.02) !important;
+        }
+        body.dark .border-white\/10 {
+             border-color: rgba(255, 255, 255, 0.08) !important;
         }
     </style>
 <script type="importmap">

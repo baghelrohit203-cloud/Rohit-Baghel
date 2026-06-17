@@ -1,0 +1,160 @@
+{
+  "collections": {
+    "activities": {
+      "schema": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "userId": { "type": "string" },
+          "date": { "type": "string" },
+          "group": { "type": "string" },
+          "project": { "type": "string" },
+          "description": { "type": "string" },
+          "timestamp": { "type": "number" },
+          "estimatedDuration": { "type": "number" },
+          "actualDuration": { "type": "number" },
+          "status": { "type": "string" },
+          "rescheduledTo": { "type": "string" },
+          "startTime": { "type": "string" },
+          "alarmEnabled": { "type": "boolean" },
+          "goalId": { "type": "string" },
+          "distractions": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "timer": {
+            "type": "object",
+            "properties": {
+              "isActive": { "type": "boolean" },
+              "lastStartTime": { "type": "number" },
+              "totalElapsed": { "type": "number" }
+            }
+          }
+        },
+        "required": ["id", "userId", "date", "description", "status"]
+      }
+    },
+    "notes": {
+      "schema": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "userId": { "type": "string" },
+          "title": { "type": "string" },
+          "content": { "type": "string" },
+          "type": { "type": "string" },
+          "project": { "type": "string" },
+          "createdAt": { "type": "number" },
+          "updatedAt": { "type": "number" },
+          "blocks": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": { "type": "string" },
+                "topic": { "type": "string" },
+                "content": { "type": "string" },
+                "timestamp": { "type": "number" }
+              }
+            }
+          }
+        },
+        "required": ["id", "userId", "title", "type"]
+      }
+    },
+    "goals": {
+      "schema": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "userId": { "type": "string" },
+          "title": { "type": "string" },
+          "description": { "type": "string" },
+          "targetDate": { "type": "string" },
+          "isCompleted": { "type": "boolean" },
+          "createdAt": { "type": "number" }
+        },
+        "required": ["id", "userId", "title", "isCompleted"]
+      }
+    },
+    "reflections": {
+      "schema": {
+        "type": "object",
+        "properties": {
+          "userId": { "type": "string" },
+          "content": { "type": "string" },
+          "updatedAt": { "type": "number" }
+        },
+        "required": ["userId", "content"]
+      }
+    },
+    "vaultEntries": {
+      "schema": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "userId": { "type": "string" },
+          "category": { "type": "string" },
+          "title": { "type": "string" },
+          "content": { "type": "string" },
+          "date": { "type": "string" },
+          "projectTag": { "type": "string" },
+          "impactRating": { "type": "number" },
+          "status": { "type": "string" },
+          "createdAt": { "type": "number" },
+          "updatedAt": { "type": "number" },
+          "listItems": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": { "type": "string" },
+                "text": { "type": "string" },
+                "completed": { "type": "boolean" }
+              }
+            }
+          }
+        },
+        "required": ["id", "userId", "category", "title"]
+      }
+    },
+    "priceArticles": {
+      "schema": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "userId": { "type": "string" },
+          "name": { "type": "string" },
+          "category": { "type": "string" },
+          "tags": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "createdAt": { "type": "number" },
+          "updatedAt": { "type": "number" },
+          "records": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": { "type": "string" },
+                "price": { "type": "number" },
+                "currency": { "type": "string" },
+                "dateRecorded": { "type": "string" },
+                "location": { "type": "string" },
+                "city": { "type": "string" },
+                "state": { "type": "string" },
+                "supplierName": { "type": "string" },
+                "unit": { "type": "string" },
+                "notes": { "type": "string" },
+                "contact": { "type": "string" },
+                "reliability": { "type": "number" }
+              }
+            }
+          }
+        },
+        "required": ["id", "userId", "name", "category", "records"]
+      }
+    }
+  }
+}

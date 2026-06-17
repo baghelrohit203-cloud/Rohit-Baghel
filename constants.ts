@@ -1,26 +1,23 @@
 
-import { ActivityType, TimeBlock, NoteType } from './types';
+import { ActivityGroup, TimeBlock, NoteType } from './types';
 
-export const ACTIVITY_TYPES: ActivityType[] = ['Work', 'Study', 'Home', 'Sleep', 'Workout', 'Other'];
+export const ACTIVITY_GROUPS: ActivityGroup[] = ['Daily Maintenance', 'Office Work', 'Target Work'];
 
-export const ACTIVITY_COLORS: Record<ActivityType, string> = {
-  Work: '#3b82f6',    // Bright Blue
-  Study: '#f59e0b',   // Amber/Orange-Yellow
-  Home: '#10b981',    // Emerald Green
-  Sleep: '#8b5cf6',   // Vivid Purple
-  Workout: '#ef4444', // Vibrant Red
-  Other: '#ec4899',   // Pink/Magenta
+export const GROUP_COLORS: Record<ActivityGroup, string> = {
+  'Daily Maintenance': '#3b6e4c', // Moss Green (Environment & grounding)
+  'Office Work': '#2d5a7b',       // Deep Slate Lake (Professional stability)
+  'Target Work': '#c25e2d',       // Terracotta/Clay (Creative focus & action)
 };
 
-export const NOTE_TYPES: NoteType[] = ['Journal', 'Planner', 'Reflection', 'Idea', 'Current Project'];
+export const NOTE_TYPES: NoteType[] = ['Journal', 'Reflection', 'Goal', 'Distraction'];
 
 export const NOTE_COLORS: Record<NoteType, string> = {
-  Journal: '#8b5cf6',         // Purple
-  Planner: '#3b82f6',         // Blue
-  Reflection: '#10b981',      // Emerald
-  Idea: '#f59e0b',            // Gold
-  'Current Project': '#06b6d4' // Cyan
+  Journal: '#7a523a',       // Warm Chestnut
+  Reflection: '#2d6a4f',    // Forest Pine
+  Goal: '#b87d14',          // Harvest Bronze
+  Distraction: '#c53030'    // Rosewood / Wild Berry
 };
+
 
 export const BLOCKS: TimeBlock[] = [
   { id: 1, label: 'Brahma Muhurta', startTime: '04:00', endTime: '08:00' },

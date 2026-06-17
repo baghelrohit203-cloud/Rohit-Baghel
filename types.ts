@@ -1,9 +1,25 @@
 
-export type ActivityType = 'Work' | 'Study' | 'Home' | 'Sleep' | 'Workout' | 'Other';
+export type ActivityGroup = 'Daily Maintenance' | 'Office Work' | 'Target Work';
 export type ActivityStatus = 'Pending' | 'Completed' | 'Rescheduled';
-export type ReportInterval = 'Daily' | 'Weekly' | 'Monthly' | 'Quarterly' | 'Half-Yearly' | 'Yearly';
+export type ReportInterval = 'Daily' | 'Weekly' | 'Monthly';
 
-export type NoteType = 'Journal' | 'Planner' | 'Reflection' | 'Idea' | 'Current Project';
+export type NoteType = 'Journal' | 'Reflection' | 'Goal' | 'Distraction';
+
+export interface Goal {
+  id: string;
+  title: string;
+  description: string;
+  targetDate: string;
+  isCompleted: boolean;
+  createdAt: number;
+}
+
+export interface Distraction {
+  id: string;
+  activityId: string;
+  description: string;
+  timestamp: number;
+}
 
 export interface TimeBlock {
   id: number;
@@ -39,26 +55,75 @@ export interface Note {
 export interface ActivityEntry {
   id: string;
   date: string; // YYYY-MM-DD
-  type: ActivityType;
+  group: ActivityGroup;
   project?: string;
   description: string;
   timestamp: number;
   estimatedDuration: number; // minutes
-  overtime: number; // minutes
+  actualDuration?: number; // minutes, from timer
   status: ActivityStatus;
   rescheduledTo?: string; // date string
-  movedFromDate?: string; // date string
-  movedAt?: number; // timestamp
-  blockId?: number;
+  movedFromDate?: string; // original date before rescheduling
+  movedAt?: number; // timestamp of when it was moved
   timer?: TimerState;
   startTime?: string; // HH:mm format
   alarmEnabled?: boolean;
+  goalId?: string; // Link to a long-term goal
+  distractions?: string[]; // List of distraction descriptions
+}
+
+export type VaultCategory = 'Journal' | 'Checklist' | 'Planner' | 'Idea' | 'ProjectInfo' | 'Other';
+
+export interface VaultListItem {
+  id: string;
+  text: string;
+  completed: boolean;
+}
+
+export interface VaultEntry {
+  id: string;
+  category: VaultCategory;
+  title: string;
+  content: string; // Used for Journal, Idea, Other, ProjectInfo content
+  listItems?: VaultListItem[]; // Used for Checklist, Planner
+  date?: string; // Used for Planner date, Journal day
+  projectTag?: string; // Used for ProjectInfo tag reference
+  impactRating?: number; // Used for Idea impact rating (1-5)
+  status?: 'active' | 'completed' | 'on-hold' | 'backlog'; // Used for ProjectInfo status
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface PriceRecord {
+  id: string;
+  price: number;
+  currency: string;
+  dateRecorded: string;
+  location?: string;
+  city?: string;
+  state?: string;
+  supplierName?: string;
+  unit?: string; // e.g., 1 Kg, 1 Litre, 100g, Per Unit
+  notes?: string;
+  contact?: string; // Phone, Email or Shop detail
+  reliability?: number; // 1-5 rating on reliability or quality
+}
+
+export interface PriceArticle {
+  id: string;
+  name: string; // e.g. "Alwar Onions", "Gold (24K)", "Mustard Oil"
+  category: string; // e.g. "Vegetables", "Electronics", "Groceries", "Fuel", "Custom"
+  tags: string[]; // e.g. ["fresh", "organic", "mains", "wholesale"]
+  records: PriceRecord[];
+  createdAt: number;
+  updatedAt: number;
 }
 
 export interface AppState {
   activities: ActivityEntry[];
   notes: Note[];
-  currentView: 'dashboard' | 'stats' | 'coach' | 'backlog' | 'scribe';
+  goals: Goal[];
+  currentView: 'dashboard' | 'stats' | 'goals' | 'log' | 'focus' | 'vault' | 'watchlist' | 'sync';
   selectedDate: string;
   reportInterval: ReportInterval;
 }
