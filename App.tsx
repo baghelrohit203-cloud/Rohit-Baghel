@@ -37,12 +37,59 @@ import {
 } from './services/firebaseService';
 
 const App: React.FC = () => {
-  const [activities, setActivities] = useState<ActivityEntry[]>([]);
-  const [notes, setNotes] = useState<Note[]>([]);
-  const [goals, setGoals] = useState<Goal[]>([]);
-  const [vaultEntries, setVaultEntries] = useState<VaultEntry[]>([]);
-  const [priceArticles, setPriceArticles] = useState<PriceArticle[]>([]);
-  const [reflection, setReflection] = useState('');
+  const [activities, setActivities] = useState<ActivityEntry[]>(() => {
+    try {
+      const saved = localStorage.getItem('karma_chakra_v7_activities');
+      return saved ? JSON.parse(saved) : [];
+    } catch (e) {
+      console.error(e);
+      return [];
+    }
+  });
+  const [notes, setNotes] = useState<Note[]>(() => {
+    try {
+      const saved = localStorage.getItem('karma_chakra_v7_notes');
+      return saved ? JSON.parse(saved) : [];
+    } catch (e) {
+      console.error(e);
+      return [];
+    }
+  });
+  const [goals, setGoals] = useState<Goal[]>(() => {
+    try {
+      const saved = localStorage.getItem('karma_chakra_v7_goals');
+      return saved ? JSON.parse(saved) : [];
+    } catch (e) {
+      console.error(e);
+      return [];
+    }
+  });
+  const [vaultEntries, setVaultEntries] = useState<VaultEntry[]>(() => {
+    try {
+      const saved = localStorage.getItem('karma_chakra_v7_vault_entries');
+      return saved ? JSON.parse(saved) : [];
+    } catch (e) {
+      console.error(e);
+      return [];
+    }
+  });
+  const [priceArticles, setPriceArticles] = useState<PriceArticle[]>(() => {
+    try {
+      const saved = localStorage.getItem('karma_chakra_v7_price_articles');
+      return saved ? JSON.parse(saved) : [];
+    } catch (e) {
+      console.error(e);
+      return [];
+    }
+  });
+  const [reflection, setReflection] = useState<string>(() => {
+    try {
+      return localStorage.getItem('karma_chakra_v7_reflection') || '';
+    } catch (e) {
+      console.error(e);
+      return '';
+    }
+  });
   const [currentView, setCurrentView] = useState<AppState['currentView']>('dashboard');
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
   const [reportInterval, setReportInterval] = useState<ReportInterval>('Daily');
@@ -1047,7 +1094,7 @@ const App: React.FC = () => {
       </aside>
 
       {/* Main Container Wrapper */}
-      <div className="flex-1 max-w-lg min-h-screen flex flex-col relative pb-16">
+      <div className="flex-1 max-w-5xl lg:max-w-6xl w-full mx-auto px-4 sm:px-6 lg:px-8 min-h-screen flex flex-col relative pb-16">
       
       {/* Alarm Full-Screen Overlay */}
       {activeAlarmTask && (
