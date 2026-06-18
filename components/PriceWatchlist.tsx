@@ -135,6 +135,7 @@ export const PriceWatchlist: React.FC<PriceWatchlistProps> = ({
   // Editing existing record
   const [editingRecordId, setEditingRecordId] = useState<string | null>(null);
   const [editingArticleId, setEditingArticleId] = useState<string | null>(null);
+  const [editingArticleHeaderId, setEditingArticleHeaderId] = useState<string | null>(null);
 
   const resetForm = () => {
     setNewArtName('');
@@ -155,6 +156,7 @@ export const PriceWatchlist: React.FC<PriceWatchlistProps> = ({
     setIsAddingRecordToId(null);
     setEditingRecordId(null);
     setEditingArticleId(null);
+    setEditingArticleHeaderId(null);
   };
 
   const handleExportToExcel = () => {
@@ -471,12 +473,12 @@ export const PriceWatchlist: React.FC<PriceWatchlistProps> = ({
               }
             }}
             className={`px-4 py-2.5 rounded-2xl shadow-sm transition-all flex items-center gap-2 text-xs font-black uppercase tracking-wider ${
-              isOpenCreator || isAddingRecordToId || editingRecordId
+              isOpenCreator || isAddingRecordToId || editingRecordId || editingArticleHeaderId
                 ? 'bg-stone-200 dark:bg-stone-850 text-stone-600 dark:text-stone-300' 
                 : 'bg-[#2d6a4f] text-white hover:bg-[#1b4332] shadow-[#2d6a4f]/10'
             }`}
           >
-            {isOpenCreator || isAddingRecordToId || editingRecordId ? (
+            {isOpenCreator || isAddingRecordToId || editingRecordId || editingArticleHeaderId ? (
               <>
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
                 <span>Cancel</span>
@@ -513,6 +515,90 @@ export const PriceWatchlist: React.FC<PriceWatchlistProps> = ({
             <span className="text-xl font-black text-[#b87d14]">{availableStates.length || 1}</span>
           </div>
         </div>
+      )}
+
+      {/* EDIT ARTICLE METADATA FORM */}
+      {editingArticleHeaderId && (
+        <form onSubmit={(e) => {
+          e.preventDefault();
+          const orig = articles.find(a => a.id === editingArticleHeaderId);
+          if (orig) {
+            onUpdateArticle({
+              ...orig,
+              name: newArtName.trim(),
+              category: newArtCategory,
+              tags: newArtTagsString ? newArtTagsString.split(',').map(t => t.trim().toLowerCase()).filter(Boolean) : [],
+              updatedAt: Date.now()
+            });
+          }
+          resetForm();
+          setEditingArticleHeaderId(null);
+        }} className="glass p-6 rounded-3xl border border-stone-200/60 bg-white/95 space-y-5 animate-in slide-in-from-top-4 duration-300">
+          <div className="flex items-center justify-between border-b border-stone-200/40 pb-3">
+            <h3 className="text-xs font-black text-[#2d6a4f] uppercase tracking-widest flex items-center gap-1.5">
+              <span>✏️</span>
+              <span>Alter Article Catalog details</span>
+            </h3>
+            <span className="text-[9px] mono text-[#2d6a4f] font-bold bg-[#2d6a4f]/10 px-2.5 py-1 rounded-full uppercase tracking-widest">
+              Metadata Editing Mode
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="text-[10px] font-black text-stone-400 uppercase tracking-widest block mb-1.5">Article / Product Name</label>
+              <input 
+                type="text" 
+                value={newArtName} 
+                onChange={(e) => setNewArtName(e.target.value)} 
+                required
+                className="w-full bg-stone-50 border border-stone-200/80 rounded-xl px-4 py-3 text-sm text-[#2b2925] focus:outline-none focus:ring-2 focus:ring-[#2d6a4f]/20"
+              />
+            </div>
+            <div>
+              <label className="text-[10px] font-black text-stone-400 uppercase tracking-widest block mb-1.5">Category Designation</label>
+              <select
+                value={newArtCategory}
+                onChange={(e) => setNewArtCategory(e.target.value)}
+                className="w-full bg-stone-50 border border-stone-200/80 rounded-xl px-4 py-3 text-xs text-[#2b2925] outline-none"
+              >
+                {COMMON_CATEGORIES.map(cat => (
+                  <option key={cat} value={cat}>{cat}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <div>
+            <label className="text-[10px] font-black text-stone-400 uppercase tracking-widest block mb-1.5">Search Keywords & Tags (comma separated)</label>
+            <input 
+              type="text" 
+              value={newArtTagsString} 
+              onChange={(e) => setNewArtTagsString(e.target.value)} 
+              placeholder="e.g. food, vegetable, organic"
+              className="w-full bg-stone-50 border border-stone-200/80 rounded-xl px-4 py-3 text-xs text-[#2b2925] focus:outline-none focus:ring-2"
+            />
+          </div>
+
+          <div className="flex justify-end gap-3 pt-4 border-t border-stone-200/40">
+            <button 
+              type="button" 
+              onClick={() => {
+                resetForm();
+                setEditingArticleHeaderId(null);
+              }}
+              className="px-5 py-2.5 text-xs font-black text-stone-500 hover:bg-stone-100 rounded-xl uppercase tracking-widest"
+            >
+              Cancel
+            </button>
+            <button 
+              type="submit"
+              className="px-6 py-2.5 bg-[#2d6a4f] text-white text-xs font-black rounded-xl hover:bg-[#1b4332] uppercase tracking-widest transition-all shadow-md"
+            >
+              Update Article
+            </button>
+          </div>
+        </form>
       )}
 
       {/* CREATION WORKSPACE FOR ARTICLE & INITIAL PRICE FEED */}
@@ -1182,6 +1268,19 @@ export const PriceWatchlist: React.FC<PriceWatchlistProps> = ({
                     title="Add alternative cost details here"
                   >
                     + Add Price
+                  </button>
+                  <button 
+                    onClick={() => {
+                      setEditingArticleHeaderId(art.id);
+                      setNewArtName(art.name);
+                      setNewArtCategory(art.category);
+                      setNewArtTagsString(art.tags?.join(', ') || '');
+                      window.scrollTo({ top: 0, behavior: 'smooth' });
+                    }}
+                    className="p-1.5 text-stone-400 hover:text-stone-700 hover:bg-stone-100 dark:hover:bg-stone-850 rounded"
+                    title="Edit article details (Name, Category, Tags)"
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
                   </button>
                   <button 
                     onClick={() => { if(confirm('Are you sure you want to delete this article and all its price logs?')) onDeleteArticle(art.id); }}

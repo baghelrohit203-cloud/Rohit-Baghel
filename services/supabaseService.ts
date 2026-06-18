@@ -79,6 +79,7 @@ export const uploadLocalDataToSupabase = async (
         distractions: item.distractions || null,
         actual_duration: item.actualDuration || null,
         rescheduled_to: item.rescheduledTo || null,
+        image_url: item.imageUrl || null,
       }));
 
       const { error } = await client.from('activities').upsert(records);
@@ -99,7 +100,8 @@ export const uploadLocalDataToSupabase = async (
               rescheduledTo: item.rescheduledTo,
               movedFromDate: item.movedFromDate,
               movedAt: item.movedAt,
-              timestamp: item.timestamp
+              timestamp: item.timestamp,
+              imageUrl: item.imageUrl,
             };
             return {
               id: item.id,
@@ -294,6 +296,7 @@ export const subscribeToSupabaseCollections = (
       distractions: meta.distractions || row.distractions || undefined,
       actualDuration: meta.actualDuration || row.actual_duration || undefined,
       rescheduledTo: meta.rescheduledTo || row.rescheduled_to || undefined,
+      imageUrl: meta.imageUrl || row.image_url || undefined,
     };
   };
 
@@ -425,6 +428,7 @@ export const subscribeToSupabaseCollections = (
             distractions: item.distractions || null,
             actual_duration: item.actualDuration || null,
             rescheduled_to: item.rescheduledTo || null,
+            image_url: item.imageUrl || null,
           }));
           const { error: seedError } = await client.from('activities').upsert(records);
           if (seedError) {
@@ -444,7 +448,8 @@ export const subscribeToSupabaseCollections = (
                   rescheduledTo: item.rescheduledTo,
                   movedFromDate: item.movedFromDate,
                   movedAt: item.movedAt,
-                  timestamp: item.timestamp
+                  timestamp: item.timestamp,
+                  imageUrl: item.imageUrl,
                 };
                 return {
                   id: item.id,
@@ -687,21 +692,37 @@ export const supabaseSaveActivity = async (userId: string, item: ActivityEntry) 
     distractions: item.distractions || null,
     actual_duration: item.actualDuration || null,
     rescheduled_to: item.rescheduledTo || null,
+    image_url: item.imageUrl || null,
   });
   if (error) {
     if (error.code === '42703' || error.message?.includes('column') || error.message?.includes('does not exist')) {
-      console.warn('Saving activity failed due to missing columns, trying basic columns fallback', error);
+      console.warn('Saving activity failed due to missing columns, trying basic columns fallback with metadata packing...', error);
+      const meta = {
+        status: item.status,
+        date: item.date,
+        project: item.project,
+        startTime: item.startTime,
+        alarmEnabled: item.alarmEnabled,
+        timer: item.timer,
+        distractions: item.distractions,
+        actualDuration: item.actualDuration,
+        rescheduledTo: item.rescheduledTo,
+        movedFromDate: item.movedFromDate,
+        movedAt: item.movedAt,
+        timestamp: item.timestamp,
+        imageUrl: item.imageUrl,
+      };
       const { error: retryError } = await client.from('activities').upsert({
         id: item.id,
         user_id: userId,
-        title: item.description,
+        title: `${item.description} __META__${JSON.stringify(meta)}`,
         estimated_duration: item.estimatedDuration,
         group_name: item.group,
       });
       if (retryError) {
-        console.error('Basic fallback save failed:', retryError);
+        console.error('Basic metadata fallback save failed:', retryError);
       } else {
-        console.log('Successfully saved activity using basic columns fallback.');
+        console.log('Successfully saved activity using basic columns + metadata fallback.');
       }
     } else {
       console.error('Error saving activity to Supabase activities table:', error);
@@ -868,5 +889,80 @@ export const supabaseDeletePriceArticle = async (articleId: string) => {
   const { error } = await client.from('price_articles').delete().eq('id', articleId);
   if (error) {
     console.error('Error deleting price article from Supabase price_articles table:', error);
+  }
+};
+
+/**
+ * Uploads a file to the private Supabase Storage bucket "app-files".
+ * Folder rule: every uploaded file path must start with the user id.
+ * Format: ${auth.uid()}/${featureName}/${itemId}/${uuid}.${extension}
+ */
+export const supabaseUploadFile = async (
+  userId: string,
+  featureName: string,
+  itemId: string,
+  file: File
+): Promise<string> => {
+  const client = getSupabaseClient();
+  if (!client) {
+    throw new Error('Supabase Client is not configured.');
+  }
+
+  // Extract clean extension or default to png
+  const ext = file.name.split('.').pop() || 'png';
+  const randomUuid = Math.random().toString(36).substring(2, 12);
+  const filePath = `${userId}/${featureName}/${itemId}/${randomUuid}.${ext}`;
+
+  const { data, error } = await client.storage
+    .from('app-files')
+    .upload(filePath, file, {
+      cacheControl: '3600',
+      upsert: true,
+    });
+
+  if (error) {
+    throw error;
+  }
+
+  return filePath;
+};
+
+/**
+ * Displays or retrieves private files using temporary signed URLs since the bucket is private.
+ */
+export const supabaseGetSignedUrl = async (filePath: string): Promise<string> => {
+  const client = getSupabaseClient();
+  if (!client) {
+    throw new Error('Supabase Client is not configured.');
+  }
+
+  const { data, error } = await client.storage
+    .from('app-files')
+    .createSignedUrl(filePath, 3600); // 1 hour expiration
+
+  if (error) {
+    throw error;
+  }
+
+  if (!data?.signedUrl) {
+    throw new Error('Failed to retrieve signed URL from Supabase storage.');
+  }
+
+  return data.signedUrl;
+};
+
+/**
+ * Removes the given file from Supabase Storage.
+ */
+export const supabaseDeleteFile = async (filePath: string): Promise<void> => {
+  const client = getSupabaseClient();
+  if (!client) return;
+
+  const { error } = await client.storage
+    .from('app-files')
+    .remove([filePath]);
+
+  if (error) {
+    console.warn(`Could not completely clean up file ${filePath} from Storage:`, error.message);
   }
 };

@@ -70,6 +70,7 @@ export interface ActivityEntry {
   alarmEnabled?: boolean;
   goalId?: string; // Link to a long-term goal
   distractions?: string[]; // List of distraction descriptions
+  imageUrl?: string; // Image proof for task check / completion
 }
 
 export type VaultCategory = 'Journal' | 'Checklist' | 'Planner' | 'Idea' | 'ProjectInfo' | 'Other';

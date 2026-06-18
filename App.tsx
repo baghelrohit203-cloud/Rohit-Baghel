@@ -52,7 +52,9 @@ import {
   supabaseSaveVaultEntry,
   supabaseDeleteVaultEntry,
   supabaseSavePriceArticle,
-  supabaseDeletePriceArticle
+  supabaseDeletePriceArticle,
+  supabaseUploadFile,
+  supabaseDeleteFile
 } from './services/supabaseService';
 
 const App: React.FC = () => {
@@ -111,6 +113,37 @@ const App: React.FC = () => {
   });
   const [currentView, setCurrentView] = useState<AppState['currentView']>('dashboard');
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
+
+  const [showRefSaveSuccess, setShowRefSaveSuccess] = useState(false);
+
+  const parseReflections = (raw: string): Record<string, { text: string; hasMistake?: boolean; mistakeDescription?: string; timeLostMinutes?: number }> => {
+    try {
+      if (!raw || !raw.trim()) return {};
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        return parsed;
+      }
+    } catch (e) {
+      const today = new Date().toISOString().split('T')[0];
+      return {
+        [today]: { text: raw, hasMistake: false }
+      };
+    }
+    return {};
+  };
+
+  const reflectionsMap = useMemo(() => {
+    return parseReflections(reflection);
+  }, [reflection]);
+
+  const handleSaveDayReflection = (date: string, data: Partial<{ text: string; hasMistake?: boolean; mistakeDescription?: string; timeLostMinutes?: number }>) => {
+    const currentMap = parseReflections(reflection);
+    currentMap[date] = {
+      ...(currentMap[date] || { text: '' }),
+      ...data
+    };
+    setReflection(JSON.stringify(currentMap));
+  };
   const [reportInterval, setReportInterval] = useState<ReportInterval>('Daily');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingActivity, setEditingActivity] = useState<ActivityEntry | null>(null);
@@ -124,6 +157,7 @@ const App: React.FC = () => {
   const [activeAlarmTask, setActiveAlarmTask] = useState<ActivityEntry | null>(null);
   
   const [isGoalModalOpen, setIsGoalModalOpen] = useState(false);
+  const [editingGoal, setEditingGoal] = useState<Goal | null>(null);
   const [newGoalTitle, setNewGoalTitle] = useState('');
   const [newGoalDesc, setNewGoalDesc] = useState('');
   const [newGoalDate, setNewGoalDate] = useState('');
@@ -569,10 +603,13 @@ const App: React.FC = () => {
   };
 
   const deleteActivity = (activityId: string) => {
-    if (syncProvider === 'supabase') {
-      supabaseDeleteActivity(activityId);
-    } else {
-      cloudDeleteActivity(activityId);
+    setActivities(prev => prev.filter(a => a.id !== activityId));
+    if (currentUser) {
+      if (syncProvider === 'supabase') {
+        supabaseDeleteActivity(activityId);
+      } else {
+        cloudDeleteActivity(activityId);
+      }
     }
   };
 
@@ -1008,22 +1045,44 @@ const App: React.FC = () => {
 
   const handleAddGoal = () => {
     if (!newGoalTitle.trim()) return;
-    const goal: Goal = {
-      id: Math.random().toString(36).substr(2, 9),
-      title: newGoalTitle,
-      description: newGoalDesc,
-      targetDate: newGoalDate,
-      isCompleted: false,
-      createdAt: Date.now()
-    };
-    setGoals(prev => [...prev, goal]);
-    if (currentUser) {
-      saveGoal(goal);
+    if (editingGoal) {
+      const updatedGoal: Goal = {
+        ...editingGoal,
+        title: newGoalTitle.trim(),
+        description: newGoalDesc,
+        targetDate: newGoalDate,
+      };
+      setGoals(prev => prev.map(g => g.id === editingGoal.id ? updatedGoal : g));
+      if (currentUser) {
+        saveGoal(updatedGoal);
+      }
+      setEditingGoal(null);
+    } else {
+      const goal: Goal = {
+        id: Math.random().toString(36).substr(2, 9),
+        title: newGoalTitle.trim(),
+        description: newGoalDesc,
+        targetDate: newGoalDate,
+        isCompleted: false,
+        createdAt: Date.now()
+      };
+      setGoals(prev => [...prev, goal]);
+      if (currentUser) {
+        saveGoal(goal);
+      }
     }
     setNewGoalTitle('');
     setNewGoalDesc('');
     setNewGoalDate('');
     setIsGoalModalOpen(false);
+  };
+
+  const startEditGoal = (goal: Goal) => {
+    setEditingGoal(goal);
+    setNewGoalTitle(goal.title);
+    setNewGoalDesc(goal.description);
+    setNewGoalDate(goal.targetDate);
+    setIsGoalModalOpen(true);
   };
 
   const toggleGoalCompletion = (id: string) => {
@@ -1475,6 +1534,55 @@ const App: React.FC = () => {
                   onEdit={(a) => { setEditingActivity(a); setIsModalOpen(true); }} 
                   onUpdateTimer={handleUpdateTimer} 
                   onAddDistraction={handleAddDistraction}
+                  onDelete={deleteActivity}
+                  onAttachImage={async (id, fileOrUrl) => {
+                    let finalUrl: string | undefined = undefined;
+
+                    if (fileOrUrl === undefined) {
+                      // Removing image: first let's delete the old storage file if any
+                      const act = activities.find(a => a.id === id);
+                      if (act?.imageUrl && !act.imageUrl.startsWith('http') && !act.imageUrl.startsWith('data:')) {
+                        try {
+                          await supabaseDeleteFile(act.imageUrl);
+                        } catch (err) {
+                          console.error("Failed to delete storage file:", err);
+                        }
+                      }
+                      finalUrl = undefined;
+                    } else if (fileOrUrl instanceof File) {
+                      if (currentUser) {
+                        try {
+                          // Upload to storage with clean path structure:
+                          // ${auth.uid()}/activities/${itemId}/${uuid}.${extension}
+                          finalUrl = await supabaseUploadFile(currentUser.uid, 'activities', id, fileOrUrl);
+                        } catch (err) {
+                          console.error("Storage upload failed:", err);
+                          alert("Failed to upload image to Supabase Storage.");
+                          return;
+                        }
+                      } else {
+                        // Offline fallback mode: read as local Base64
+                        finalUrl = await new Promise<string>((resolve) => {
+                          const reader = new FileReader();
+                          reader.onloadend = () => resolve(reader.result as string);
+                          reader.readAsDataURL(fileOrUrl);
+                        });
+                      }
+                    } else {
+                      finalUrl = fileOrUrl;
+                    }
+
+                    setActivities(prev => prev.map(a => {
+                      if (a.id === id) {
+                        const updated = { ...a, imageUrl: finalUrl };
+                        if (currentUser) {
+                          saveActivity(updated);
+                        }
+                        return updated;
+                      }
+                      return a;
+                    }));
+                  }}
                 />
               ))}
               {dashboardActivities.length === 0 && <div className="py-20 text-center glass rounded-3xl border-dashed border-stone-200/80 opacity-50 text-[10px] font-black uppercase tracking-[0.3em] text-stone-400">No records for this date</div>}
@@ -1503,10 +1611,13 @@ const App: React.FC = () => {
                   <div className="flex items-center justify-between mt-4">
                     <span className="text-[10px] mono text-[#c25e2d] font-bold uppercase tracking-widest">Target: {goal.targetDate}</span>
                     <div className="flex gap-2">
-                      <button onClick={() => toggleGoalCompletion(goal.id)} className={`p-2 rounded-xl border ${goal.isCompleted ? 'bg-[#3b6e4c]/10 border-[#3b6e4c]/30 text-[#3b6e4c]' : 'bg-stone-50 border-stone-200 text-stone-400 hover:bg-stone-100'}`}>
+                      <button onClick={() => toggleGoalCompletion(goal.id)} className={`p-2 rounded-xl border ${goal.isCompleted ? 'bg-[#3b6e4c]/10 border-[#3b6e4c]/30 text-[#3b6e4c]' : 'bg-stone-50 border-stone-200 text-stone-400 hover:bg-stone-100'}`} title="Mark as Completed">
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><polyline points="20 6 9 17 4 12"/></svg>
                       </button>
-                      <button onClick={() => deleteGoal(goal.id)} className="p-2 bg-stone-50 border border-stone-200 text-red-600 hover:bg-red-50 rounded-xl">
+                      <button onClick={() => startEditGoal(goal)} className="p-2 bg-stone-50 border border-stone-200 text-stone-500 hover:bg-stone-100 rounded-xl" title="Edit Goal">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+                      </button>
+                      <button onClick={() => deleteGoal(goal.id)} className="p-2 bg-stone-50 border border-stone-200 text-red-600 hover:bg-red-50 rounded-xl" title="Delete Goal">
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
                       </button>
                     </div>
@@ -1595,19 +1706,202 @@ const App: React.FC = () => {
             </div>
 
             <div className="glass p-6 rounded-3xl border border-stone-200/40 bg-white/95 space-y-4 shadow-sm">
-              <h3 className="text-[10px] font-black text-stone-500 uppercase tracking-widest">Daily Reflection</h3>
-              <textarea 
-                value={reflection}
-                onChange={(e) => setReflection(e.target.value)}
-                placeholder="How was your discipline today? Any major distractions?" 
-                className="w-full bg-stone-50 border border-stone-200/80 rounded-2xl p-4 text-sm text-[#2b2925] focus:outline-none focus:ring-2 focus:ring-[#3b6e4c]/20 focus:border-[#3b6e4c] min-h-[120px] placeholder:text-stone-300 font-medium"
-              />
+              <div className="flex items-center justify-between border-b border-stone-100 pb-3">
+                <div>
+                  <h3 className="text-[10.5px] font-black text-[#2b2925] uppercase tracking-wider font-mono">Dharma Reflections Log</h3>
+                  <p className="text-[9px] text-stone-400 font-medium mt-0.5">Track your discipline & mistake record day by day</p>
+                </div>
+                <div className="flex items-center gap-1.5 bg-stone-100/80 p-1.5 rounded-xl border border-stone-200/40">
+                  <button
+                    onClick={() => {
+                      const d = new Date(selectedDate);
+                      d.setDate(d.getDate() - 1);
+                      setSelectedDate(d.toISOString().split('T')[0]);
+                    }}
+                    className="p-1 hover:bg-white text-stone-600 rounded-lg active:scale-90 transition-all"
+                    title="Previous Day"
+                  >
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="15 18 9 12 15 6" /></svg>
+                  </button>
+                  <span className="text-[10px] font-black tracking-tighter text-[#2b2925] font-mono px-1 select-none">
+                    {selectedDate === new Date().toISOString().split('T')[0] ? 'Today' : selectedDate}
+                  </span>
+                  <button
+                    onClick={() => {
+                      const d = new Date(selectedDate);
+                      d.setDate(d.getDate() + 1);
+                      setSelectedDate(d.toISOString().split('T')[0]);
+                    }}
+                    className="p-1 hover:bg-white text-stone-600 rounded-lg active:scale-90 transition-all"
+                    title="Next Day"
+                  >
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="9 18 15 12 9 6" /></svg>
+                  </button>
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-[9px] font-black uppercase text-stone-400 tracking-wider font-mono block">Personal Notes & Reflections</label>
+                <textarea 
+                  value={reflectionsMap[selectedDate]?.text || ''}
+                  onChange={(e) => handleSaveDayReflection(selectedDate, { text: e.target.value })}
+                  placeholder="How was your discipline today? List what you accomplished or what went wrong in your exam prep..." 
+                  className="w-full bg-stone-50 border border-stone-200/80 rounded-2xl p-4 text-xs text-[#2b2925] focus:outline-none focus:ring-2 focus:ring-[#3b6e4c]/20 focus:border-[#3b6e4c] min-h-[100px] placeholder:text-stone-300 font-medium"
+                />
+              </div>
+
+              <div className="p-4 rounded-2xl border border-stone-150 bg-stone-50/55 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm">⚠️</span>
+                    <div>
+                      <span className="text-[10px] font-black text-stone-600 uppercase tracking-widest block font-mono">Mistake / Distraction Record</span>
+                      <span className="text-[9px] text-stone-400 font-medium block">Did you lose focus or slip up today?</span>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => {
+                      const wasActive = reflectionsMap[selectedDate]?.hasMistake || false;
+                      handleSaveDayReflection(selectedDate, { 
+                        hasMistake: !wasActive,
+                        mistakeDescription: !wasActive ? (reflectionsMap[selectedDate]?.mistakeDescription || '') : '',
+                        timeLostMinutes: !wasActive ? (reflectionsMap[selectedDate]?.timeLostMinutes || 30) : 0
+                      });
+                    }}
+                    className={`px-3 py-1.5 text-[9px] font-black rounded-lg transition-all uppercase tracking-wider font-mono ${
+                      reflectionsMap[selectedDate]?.hasMistake 
+                        ? 'bg-red-500 text-white shadow-sm shadow-red-500/10' 
+                        : 'bg-stone-200 text-stone-600 hover:bg-stone-300'
+                    }`}
+                  >
+                    {reflectionsMap[selectedDate]?.hasMistake ? 'Slipped Up Today' : 'No Mistakes'}
+                  </button>
+                </div>
+
+                {reflectionsMap[selectedDate]?.hasMistake && (
+                  <div className="space-y-4 pt-2 border-t border-stone-100 animate-in slide-in-from-top-2 duration-300">
+                    <div className="space-y-1">
+                      <label className="text-[9px] font-black uppercase text-red-500/70 tracking-wider font-mono block">What mistake did you make?</label>
+                      <input 
+                        type="text"
+                        value={reflectionsMap[selectedDate]?.mistakeDescription || ''}
+                        onChange={(e) => handleSaveDayReflection(selectedDate, { mistakeDescription: e.target.value })}
+                        placeholder="e.g., Scrolled Shorts for hours, woke up super late, put off mocks"
+                        className="w-full bg-white border border-stone-200/80 rounded-xl px-3 py-2 text-xs text-[#2b2925] focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500 font-medium"
+                      />
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <div className="flex items-center justify-between">
+                        <label className="text-[9px] font-black uppercase text-red-500/70 tracking-wider font-mono block">Time got rid of / wasted (minutes)</label>
+                        <span className="text-xs font-black text-[#2b2925] font-mono bg-stone-100 px-2 py-0.5 rounded-lg">
+                          {reflectionsMap[selectedDate]?.timeLostMinutes || 0} mins (~{Math.round(((reflectionsMap[selectedDate]?.timeLostMinutes || 0) / 60) * 10) / 10} hrs)
+                        </span>
+                      </div>
+                      
+                      <div className="flex flex-wrap gap-1">
+                        {[15, 30, 45, 60, 120, 180, 240].map(mins => (
+                          <button
+                            key={mins}
+                            type="button"
+                            onClick={() => handleSaveDayReflection(selectedDate, { timeLostMinutes: mins })}
+                            className={`px-2 py-1 text-[9px] font-black rounded-md border transition-all uppercase font-mono ${
+                              (reflectionsMap[selectedDate]?.timeLostMinutes || 30) === mins
+                                ? 'bg-red-50 border-red-200 text-red-600'
+                                : 'bg-white border-stone-200/80 text-stone-500 hover:bg-stone-50'
+                            }`}
+                          >
+                            {mins < 60 ? `${mins}m` : `${mins / 60}h`}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
               <button 
-                onClick={() => alert('Reflection saved for today!')}
-                className="w-full py-3 bg-[#3b6e4c] text-white font-black rounded-xl uppercase tracking-widest text-[10px] hover:bg-[#2d5537] transition-colors shadow-sm"
+                onClick={() => {
+                  setShowRefSaveSuccess(true);
+                  setTimeout(() => setShowRefSaveSuccess(false), 2500);
+                }}
+                className="w-full py-3 bg-[#3b6e4c] text-white font-black rounded-xl uppercase tracking-widest text-[10px] hover:bg-[#2d5537] transition-colors shadow-sm flex items-center justify-center gap-2"
               >
-                Save Reflection
+                <span>Save reflection & mistake log</span>
+                {showRefSaveSuccess && <span className="animate-ping font-extrabold text-[9px] text-[#cbf3d2]">✓</span>}
               </button>
+
+              {showRefSaveSuccess && (
+                <div className="text-center text-[9px] font-black uppercase tracking-widest text-[#3b6e4c] animate-pulse">
+                  ✨ Reflections & Mistake Record Saved successfully!
+                </div>
+              )}
+
+              {Object.values(reflectionsMap).some(e => e.hasMistake) && (
+                <div className="pt-3 border-t border-stone-100 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[9px] font-black text-stone-500 uppercase tracking-widest font-mono">Overview & Slip-up Log</span>
+                    <span className="text-[10px] font-bold text-red-500 bg-red-50 px-2.5 py-0.5 rounded-full font-mono">
+                      Discipline loss tally: {
+                        Object.values(reflectionsMap).reduce((acc, curr) => acc + (curr.hasMistake ? (curr.timeLostMinutes || 0) : 0), 0)
+                      } mins
+                    </span>
+                  </div>
+                  
+                  <div className="max-h-[140px] overflow-y-auto space-y-1.5 pr-1 text-[11px] scrollbar-thin">
+                    {Object.entries(reflectionsMap)
+                      .filter(([date, entry]) => entry.hasMistake && entry.mistakeDescription)
+                      .sort((a, b) => b[0].localeCompare(a[0]))
+                      .slice(0, 5)
+                      .map(([date, entry]) => (
+                        <div key={date} className="bg-white border border-stone-150 p-2.5 rounded-xl space-y-1">
+                          <div className="flex items-start justify-between">
+                            <div className="space-y-0.5 max-w-[75%]">
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-[8.5px] font-black text-stone-400 font-mono uppercase">{date}</span>
+                                {selectedDate === date && (
+                                  <span className="text-[8px] bg-amber-500 text-white font-black px-1 py-0.5 rounded uppercase animate-un-pulse font-mono block leading-none">Active</span>
+                                )}
+                              </div>
+                              <p className="text-[11px] font-bold text-stone-700 leading-tight">{entry.mistakeDescription}</p>
+                            </div>
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-[10px] font-black text-red-500 font-mono">-{entry.timeLostMinutes}m</span>
+                              
+                              <button 
+                                onClick={() => {
+                                  setSelectedDate(date);
+                                  // Scroll up slightly to make sure the user sees the form
+                                  window.scrollTo({ top: 400, behavior: 'smooth' });
+                                }} 
+                                className="p-1 hover:bg-stone-105 text-stone-500 rounded transition-colors"
+                                title="Alter this mistake record (loads to form above)"
+                              >
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+                              </button>
+
+                              <button 
+                                onClick={() => {
+                                  if (confirm(`Delete the mistake record for ${date}?`)) {
+                                    handleSaveDayReflection(date, {
+                                      hasMistake: false,
+                                      mistakeDescription: '',
+                                      timeLostMinutes: 0
+                                    });
+                                  }
+                                }} 
+                                className="p-1 hover:bg-red-50 text-stone-400 hover:text-red-500 rounded transition-colors"
+                                title="Delete this mistake record"
+                              >
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Study Cheatsheets / Creative Notes board */}
@@ -1974,7 +2268,7 @@ const App: React.FC = () => {
 {`-- 1. Create tables first with explicit public schema prefix
 create table if not exists public.activities (
   id text primary key,
-  user_id text,
+  user_id uuid not null, -- Use uuid to prevent operator type mismatch error (text = uuid)
   title text,
   estimated_duration integer,
   group_name text,
@@ -1991,12 +2285,13 @@ create table if not exists public.activities (
   goal_id text,
   distractions jsonb,
   actual_duration integer,
-  rescheduled_to text
+  rescheduled_to text,
+  image_url text -- Attached completion / verification image proof url
 );
 
 create table if not exists public.notes (
   id text primary key,
-  user_id text,
+  user_id uuid not null,
   title text,
   content text,
   type text,
@@ -2009,7 +2304,7 @@ create table if not exists public.notes (
 
 create table if not exists public.goals (
   id text primary key,
-  user_id text,
+  user_id uuid not null,
   title text,
   description text,
   target_date text,
@@ -2018,14 +2313,14 @@ create table if not exists public.goals (
 );
 
 create table if not exists public.reflections (
-  user_id text primary key,
+  user_id uuid primary key,
   content text,
   updated_at bigint
 );
 
 create table if not exists public.vault_entries (
   id text primary key,
-  user_id text,
+  user_id uuid not null,
   title text,
   content text,
   category text,
@@ -2040,7 +2335,7 @@ create table if not exists public.vault_entries (
 
 create table if not exists public.price_articles (
   id text primary key,
-  user_id text,
+  user_id uuid not null,
   name text,
   category text,
   tags text[],
@@ -2057,6 +2352,7 @@ alter table public.activities add column if not exists goal_id text;
 alter table public.activities add column if not exists distractions jsonb;
 alter table public.activities add column if not exists actual_duration integer;
 alter table public.activities add column if not exists rescheduled_to text;
+alter table public.activities add column if not exists image_url text; -- Added image_url column
 
 alter table public.notes add column if not exists project text;
 alter table public.notes add column if not exists blocks jsonb;
@@ -2078,27 +2374,27 @@ alter table public.price_articles enable row level security;
 -- 3. Create native, secure policies using auth.uid()
 drop policy if exists "activities_session_owner" on public.activities;
 create policy "activities_session_owner" on public.activities
-  for all using (auth.uid()::text = user_id::text) with check (auth.uid()::text = user_id::text);
+  for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
 
 drop policy if exists "notes_session_owner" on public.notes;
 create policy "notes_session_owner" on public.notes
-  for all using (auth.uid()::text = user_id::text) with check (auth.uid()::text = user_id::text);
+  for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
 
 drop policy if exists "goals_session_owner" on public.goals;
 create policy "goals_session_owner" on public.goals
-  for all using (auth.uid()::text = user_id::text) with check (auth.uid()::text = user_id::text);
+  for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
 
 drop policy if exists "reflections_session_owner" on public.reflections;
 create policy "reflections_session_owner" on public.reflections
-  for all using (auth.uid()::text = user_id::text) with check (auth.uid()::text = user_id::text);
+  for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
 
 drop policy if exists "vault_entries_session_owner" on public.vault_entries;
 create policy "vault_entries_session_owner" on public.vault_entries
-  for all using (auth.uid()::text = user_id::text) with check (auth.uid()::text = user_id::text);
+  for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
 
 drop policy if exists "price_articles_session_owner" on public.price_articles;
 create policy "price_articles_session_owner" on public.price_articles
-  for all using (auth.uid()::text = user_id::text) with check (auth.uid()::text = user_id::text);
+  for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
 
 -- 4. Create Real-Time Publication safely
 do $$
@@ -2230,15 +2526,19 @@ end $$;`}
       {isGoalModalOpen && (
         <div className="fixed inset-0 z-[150] flex items-center justify-center p-4 bg-stone-900/40 backdrop-blur-xl">
           <div className="w-full max-w-md bg-[#faf8f5] p-6 rounded-[32px] border border-stone-200/65 shadow-2xl">
-            <h2 className="text-xl font-black mb-6 text-[#2b2925] text-center tracking-tighter uppercase">New Long-Term Goal</h2>
+            <h2 className="text-xl font-black mb-6 text-[#2b2925] text-center tracking-tighter uppercase">
+              {editingGoal ? 'Alter Long-Term Goal' : 'New Long-Term Goal'}
+            </h2>
             <div className="space-y-4">
               <input type="text" autoComplete="off" autoCorrect="off" spellCheck={false} value={newGoalTitle} onChange={(e) => setNewGoalTitle(e.target.value)} placeholder="Goal Title (e.g. Clear SBI PO)" className="w-full bg-stone-50 border border-stone-200/80 rounded-xl px-4 py-4 text-sm text-[#2b2925] focus:outline-none focus:ring-2 focus:ring-[#c25e2d]/30 focus:border-[#c25e2d]" />
               <textarea value={newGoalDesc} onChange={(e) => setNewGoalDesc(e.target.value)} placeholder="Description or Motivation" className="w-full bg-stone-50 border border-stone-200/80 rounded-xl px-4 py-4 text-sm text-[#2b2925] focus:outline-none focus:ring-2 focus:ring-[#c25e2d]/30 focus:border-[#c25e2d] min-h-[100px]" />
               <input type="date" value={newGoalDate} onChange={(e) => setNewGoalDate(e.target.value)} className="w-full bg-stone-50 border border-stone-200/80 rounded-xl px-4 py-4 text-sm text-[#2b2925] focus:outline-none focus:ring-2 focus:ring-[#c25e2d]/30 focus:border-[#c25e2d]" />
             </div>
             <div className="flex gap-3 mt-8">
-              <button onClick={() => setIsGoalModalOpen(false)} className="flex-1 py-4 text-[10px] text-stone-400 uppercase font-black tracking-widest">Cancel</button>
-              <button onClick={handleAddGoal} className="flex-[2] py-4 bg-[#c25e2d] hover:bg-[#b05023] text-white font-black rounded-2xl uppercase tracking-widest text-[10px] shadow-lg shadow-[#c25e2d]/10">Save Goal</button>
+              <button onClick={() => { setIsGoalModalOpen(false); setEditingGoal(null); setNewGoalTitle(''); setNewGoalDesc(''); setNewGoalDate(''); }} className="flex-1 py-4 text-[10px] text-stone-400 uppercase font-black tracking-widest">Cancel</button>
+              <button onClick={handleAddGoal} className="flex-[2] py-4 bg-[#c25e2d] hover:bg-[#b05023] text-white font-black rounded-2xl uppercase tracking-widest text-[10px] shadow-lg shadow-[#c25e2d]/10">
+                {editingGoal ? 'Update Goal' : 'Save Goal'}
+              </button>
             </div>
           </div>
         </div>
