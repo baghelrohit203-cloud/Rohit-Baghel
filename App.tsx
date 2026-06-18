@@ -129,9 +129,7 @@ const App: React.FC = () => {
   const [newGoalDate, setNewGoalDate] = useState('');
 
   // Supabase Auth & Sync State flags
-  const [syncProvider, setSyncProvider] = useState<'firebase' | 'supabase'>(() => {
-    return (localStorage.getItem('karma_chakra_sync_provider') as 'firebase' | 'supabase') || 'supabase';
-  });
+  const [syncProvider, setSyncProvider] = useState<'firebase' | 'supabase'>('supabase');
   const [supabaseUrl, setSupabaseUrl] = useState(() => localStorage.getItem('karma_chakra_supabase_url') || '');
   const [supabaseKey, setSupabaseKey] = useState(() => localStorage.getItem('karma_chakra_supabase_key') || '');
   const [currentUser, setCurrentUser] = useState<{ uid: string; email?: string } | null>(null);
@@ -156,6 +154,8 @@ const App: React.FC = () => {
     if (saved) return saved === 'true';
     return window.innerWidth >= 1024;
   });
+
+  const [isMobileMoreOpen, setIsMobileMoreOpen] = useState<boolean>(false);
 
   const audioContextRef = useRef<AudioContext | null>(null);
   const alarmIntervalRef = useRef<number | null>(null);
@@ -414,6 +414,10 @@ const App: React.FC = () => {
       });
     };
   }, [supabaseUrl, supabaseKey]);
+
+  useEffect(() => {
+    localStorage.setItem('karma_chakra_sync_provider', 'supabase');
+  }, []);
 
   useEffect(() => {
     localStorage.setItem('karma_chakra_v7_activities', JSON.stringify(activities));
@@ -1279,7 +1283,7 @@ const App: React.FC = () => {
       </aside>
 
       {/* Main Container Wrapper */}
-      <div className="flex-1 w-full max-w-[96%] xl:max-w-[1500px] mx-auto px-4 sm:px-6 lg:px-8 min-h-screen flex flex-col relative pb-16">
+      <div className="flex-1 w-full max-w-[96%] xl:max-w-[1500px] mx-auto px-4 sm:px-6 lg:px-8 min-h-screen flex flex-col relative pb-24 lg:pb-16">
       
       {/* Alarm Full-Screen Overlay */}
       {activeAlarmTask && (
@@ -1922,7 +1926,7 @@ const App: React.FC = () => {
                     Log into your Supabase Dashboard, open the SQL Editor, and paste the following commands to instantly create the required table structure:
                   </p>
                   <pre className="text-[9px] font-mono text-stone-300 bg-black/50 p-3 rounded-lg overflow-x-auto max-h-48 select-all">
-{`-- SQL Initialization script
+{`-- 1. Create tables if not exists
 create table if not exists activities (
   id text primary key,
   user_id text,
@@ -1984,7 +1988,15 @@ create table if not exists price_articles (
   records jsonb,
   created_at bigint,
   updated_at bigint
-);`}
+);
+
+-- 2. Enable Real-Time replication for these tables in Supabase
+alter publication supabase_realtime add table activities;
+alter publication supabase_realtime add table notes;
+alter publication supabase_realtime add table goals;
+alter publication supabase_realtime add table reflections;
+alter publication supabase_realtime add table vault_entries;
+alter publication supabase_realtime add table price_articles;`}
                   </pre>
                 </div>
               </div>
@@ -2083,6 +2095,144 @@ create table if not exists price_articles (
           onSave={handleSaveNote}
           onDelete={handleDeleteNote}
         />
+      )}
+
+      {/* Mobile Bottom Navigation Bar */}
+      <div className="fixed bottom-0 left-0 right-0 z-50 lg:hidden bg-white/95 dark:bg-[#0c0c0c]/95 border-t border-stone-200/60 dark:border-stone-850 px-4 py-2 flex items-center justify-around h-16 shadow-[0_-5px_20px_rgba(0,0,0,0.06)] backdrop-blur-xl">
+        <button 
+          onClick={() => { setCurrentView('dashboard'); setIsMobileMoreOpen(false); }}
+          className={`flex flex-col items-center justify-center flex-1 h-full py-1 text-center transition-all ${
+            currentView === 'dashboard' ? 'text-[#c25e2d]' : 'text-stone-400 dark:text-stone-500 hover:text-stone-600'
+          }`}
+        >
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M3 9h18"/><path d="M9 21V9"/></svg>
+          <span className="text-[9px] font-black tracking-tight mt-1 uppercase">Home</span>
+        </button>
+
+        <button 
+          onClick={() => { setCurrentView('focus'); setIsMobileMoreOpen(false); }}
+          className={`flex flex-col items-center justify-center flex-1 h-full py-1 text-center transition-all ${
+            currentView === 'focus' ? 'text-[#3b6e4c]' : 'text-stone-400 dark:text-stone-500 hover:text-stone-600'
+          }`}
+        >
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+          <span className="text-[9px] font-black tracking-tight mt-1 uppercase">Focus</span>
+        </button>
+
+        <button 
+          onClick={() => { setCurrentView('goals'); setIsMobileMoreOpen(false); }}
+          className={`flex flex-col items-center justify-center flex-1 h-full py-1 text-center transition-all ${
+            currentView === 'goals' ? 'text-[#b87d14]' : 'text-stone-400 dark:text-stone-500 hover:text-stone-600'
+          }`}
+        >
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
+          <span className="text-[9px] font-black tracking-tight mt-1 uppercase">Goals</span>
+        </button>
+
+        <button 
+          onClick={() => { setCurrentView('log'); setIsMobileMoreOpen(false); }}
+          className={`flex flex-col items-center justify-center flex-1 h-full py-1 text-center transition-all ${
+            currentView === 'log' ? 'text-[#2d5a7b]' : 'text-stone-400 dark:text-stone-500 hover:text-stone-600'
+          }`}
+        >
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+          <span className="text-[9px] font-black tracking-tight mt-1 uppercase">Log</span>
+        </button>
+
+        <button 
+          onClick={() => setIsMobileMoreOpen(!isMobileMoreOpen)}
+          className={`flex flex-col items-center justify-center flex-1 h-full py-1 text-center transition-all ${
+            isMobileMoreOpen || ['stats', 'vault', 'watchlist', 'sync'].includes(currentView)
+              ? 'text-[#823a9d]' 
+              : 'text-stone-400 dark:text-stone-500 hover:text-stone-600'
+          }`}
+        >
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><circle cx="12" cy="12" r="1.5"/><circle cx="6" cy="12" r="1.5"/><circle cx="18" cy="12" r="1.5"/></svg>
+          <span className="text-[9px] font-black tracking-tight mt-1 uppercase">{isMobileMoreOpen ? 'Close' : 'More'}</span>
+        </button>
+      </div>
+
+      {/* Mobile More Navigation Overlay bottom sheet */}
+      {isMobileMoreOpen && (
+        <>
+          <div 
+            onClick={() => setIsMobileMoreOpen(false)}
+            className="fixed inset-0 z-30 bg-stone-900/30 dark:bg-black/60 backdrop-blur-sm lg:hidden animate-in fade-in duration-200"
+          />
+          <div className="fixed bottom-16 left-0 right-0 z-40 lg:hidden bg-white/95 dark:bg-[#0c0c0c]/95 border-t border-stone-200/60 dark:border-stone-850 p-6 rounded-t-3xl shadow-[0_-10px_35px_rgba(0,0,0,0.12)] backdrop-blur-xl animate-in slide-in-from-bottom duration-300">
+            <div className="flex justify-between items-center mb-5 border-b border-stone-100 dark:border-stone-900 pb-3">
+              <span className="text-xs font-black tracking-widest uppercase text-stone-400">Additional Scribes & Tools</span>
+              <button 
+                onClick={() => setIsMobileMoreOpen(false)}
+                className="text-[10px] font-black uppercase tracking-wider text-stone-400 hover:text-[#c25e2d] transition-colors"
+              >
+                Hide
+              </button>
+            </div>
+            
+            <div className="grid grid-cols-2 gap-3 pb-4">
+              <button
+                onClick={() => { setCurrentView('stats'); setIsMobileMoreOpen(false); }}
+                className={`flex flex-col items-start gap-2 p-4 rounded-2xl border text-left transition-all ${
+                  currentView === 'stats' 
+                    ? 'border-[#2d6a4f]/30 bg-[#2d6a4f]/5 text-[#2d6a4f]' 
+                    : 'border-stone-200/50 dark:border-stone-800 bg-stone-50/55 dark:bg-stone-900/40 text-stone-600 dark:text-stone-300 hover:bg-stone-100/50'
+                }`}
+              >
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M12 20V10"/><path d="M18 20V4"/><path d="M6 20v-4"/></svg>
+                <div className="flex flex-col">
+                  <span className="text-xs font-black uppercase tracking-wider">Analytics</span>
+                  <span className="text-[9px] text-stone-400 font-bold mt-0.5 leading-none">View chakra stats</span>
+                </div>
+              </button>
+
+              <button
+                onClick={() => { setCurrentView('vault'); setIsMobileMoreOpen(false); }}
+                className={`flex flex-col items-start gap-2 p-4 rounded-2xl border text-left transition-all ${
+                  currentView === 'vault' 
+                    ? 'border-[#7a523a]/30 bg-[#7a523a]/5 text-[#7a523a]' 
+                    : 'border-stone-200/50 dark:border-stone-800 bg-stone-50/55 dark:bg-stone-900/40 text-stone-600 dark:text-stone-300 hover:bg-stone-100/50'
+                }`}
+              >
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M4 19.5V15a2.5 2.5 0 0 1 2.5-2.5H14" /><path d="M20 19.5V5a2.5 2.5 0 0 0-2.5-2.5H14" /><path d="M12 2v20" /><path d="M4 6h16" /><path d="M4 10h16" /><path d="M4 14h16" /><path d="m19 19-3-3 3-3" /></svg>
+                <div className="flex flex-col">
+                  <span className="text-xs font-black uppercase tracking-wider">Dharma Vault</span>
+                  <span className="text-[9px] text-stone-400 font-bold mt-0.5 leading-none">User-encrypted scribe</span>
+                </div>
+              </button>
+
+              <button
+                onClick={() => { setCurrentView('watchlist'); setIsMobileMoreOpen(false); }}
+                className={`flex flex-col items-start gap-2 p-4 rounded-2xl border text-left transition-all ${
+                  currentView === 'watchlist' 
+                    ? 'border-[#2d6a4f]/30 bg-[#2d6a4f]/5 text-[#2d6a4f]' 
+                    : 'border-stone-200/50 dark:border-stone-800 bg-stone-50/55 dark:bg-stone-900/40 text-stone-600 dark:text-stone-300 hover:bg-stone-100/50'
+                }`}
+              >
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M12 2v20"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/><path d="M6 12h12"/></svg>
+                <div className="flex flex-col">
+                  <span className="text-xs font-black uppercase tracking-wider">Watchlist</span>
+                  <span className="text-[9px] text-stone-400 font-bold mt-0.5 leading-none">Aesthetic price widget</span>
+                </div>
+              </button>
+
+              <button
+                onClick={() => { setCurrentView('sync'); setIsMobileMoreOpen(false); }}
+                className={`flex flex-col items-start gap-2 p-4 rounded-2xl border text-left transition-all ${
+                  currentView === 'sync' 
+                    ? 'border-[#823a9d]/30 bg-[#823a9d]/5 text-[#823a9d]' 
+                    : 'border-stone-200/50 dark:border-stone-800 bg-stone-50/55 dark:bg-stone-900/40 text-stone-600 dark:text-stone-300 hover:bg-stone-100/50'
+                }`}
+              >
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+                <div className="flex flex-col">
+                  <span className="text-xs font-black uppercase tracking-wider">Credentials</span>
+                  <span className="text-[9px] text-stone-400 font-bold mt-0.5 leading-none">Supabase cloud active</span>
+                </div>
+              </button>
+            </div>
+          </div>
+        </>
       )}
     </div>
   );

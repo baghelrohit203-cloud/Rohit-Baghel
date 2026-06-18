@@ -269,11 +269,27 @@ export const subscribeToSupabaseCollections = (
   // Create Postgres changes subscriptions for user's tables (useful if tables have CDC enabled)
   const channel = client
     .channel('supabase-sync-changes')
-    .on('postgres_changes', { event: '*', schema: 'public', filter: `user_id=eq.${userId}` }, () => {
-      // Re-pull to maintain correct ordering and values safely
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'activities', filter: `user_id=eq.${userId}` }, () => {
       pullInitialData();
     })
-    .subscribe();
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'notes', filter: `user_id=eq.${userId}` }, () => {
+      pullInitialData();
+    })
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'goals', filter: `user_id=eq.${userId}` }, () => {
+      pullInitialData();
+    })
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'reflections', filter: `user_id=eq.${userId}` }, () => {
+      pullInitialData();
+    })
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'vault_entries', filter: `user_id=eq.${userId}` }, () => {
+      pullInitialData();
+    })
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'price_articles', filter: `user_id=eq.${userId}` }, () => {
+      pullInitialData();
+    })
+    .subscribe((status) => {
+      console.log('Supabase real-time stream subscription status:', status);
+    });
 
   return [() => {
     client.removeChannel(channel);
