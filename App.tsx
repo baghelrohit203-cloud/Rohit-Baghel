@@ -1929,8 +1929,8 @@ const App: React.FC = () => {
                     Log into your Supabase Dashboard, open the SQL Editor, and paste the following commands to instantly create the required table structure:
                   </p>
                   <pre className="text-[9px] font-mono text-stone-300 bg-black/50 p-3 rounded-lg overflow-x-auto max-h-48 select-all">
-{`-- 1. Create tables if not exists
-create table if not exists activities (
+{`-- 1. Create tables first with explicit public schema prefix
+create table if not exists public.activities (
   id text primary key,
   user_id text,
   title text,
@@ -1945,7 +1945,7 @@ create table if not exists activities (
   created_at bigint
 );
 
-create table if not exists notes (
+create table if not exists public.notes (
   id text primary key,
   user_id text,
   title text,
@@ -1956,7 +1956,7 @@ create table if not exists notes (
   is_pinned boolean
 );
 
-create table if not exists goals (
+create table if not exists public.goals (
   id text primary key,
   user_id text,
   title text,
@@ -1966,13 +1966,13 @@ create table if not exists goals (
   created_at bigint
 );
 
-create table if not exists reflections (
+create table if not exists public.reflections (
   user_id text primary key,
   content text,
   updated_at bigint
 );
 
-create table if not exists vault_entries (
+create table if not exists public.vault_entries (
   id text primary key,
   user_id text,
   title text,
@@ -1982,7 +1982,7 @@ create table if not exists vault_entries (
   updated_at bigint
 );
 
-create table if not exists price_articles (
+create table if not exists public.price_articles (
   id text primary key,
   user_id text,
   name text,
@@ -1993,73 +1993,57 @@ create table if not exists price_articles (
   updated_at bigint
 );
 
--- 2. Enable Real-Time replication for these tables safely (idempotent PL/pgSQL block)
+-- 2. Create Real-Time Publication safely
 do $$
 begin
-  -- Ensure publication exists
   if not exists (select 1 from pg_publication where pubname = 'supabase_realtime') then
     create publication supabase_realtime;
   end if;
-  
-  -- Add activities table safely
-  if not exists (
-    select 1 from pg_publication_rel pr 
-    join pg_class c on pr.prrelid = c.oid 
-    join pg_publication p on pr.prpubid = p.oid 
-    where p.pubname = 'supabase_realtime' and c.relname = 'activities'
-  ) then
-    alter publication supabase_realtime add table activities;
-  end if;
+exception
+  when others then null;
+end $$;
 
-  -- Add notes table safely
-  if not exists (
-    select 1 from pg_publication_rel pr 
-    join pg_class c on pr.prrelid = c.oid 
-    join pg_publication p on pr.prpubid = p.oid 
-    where p.pubname = 'supabase_realtime' and c.relname = 'notes'
-  ) then
-    alter publication supabase_realtime add table notes;
-  end if;
+-- 3. Add tables to replication safely (handles already added / missing tables gracefully)
+do $$ begin
+  alter publication supabase_realtime add table public.activities;
+exception
+  when duplicate_object then null;
+  when undefined_table then null;
+end $$;
 
-  -- Add goals table safely
-  if not exists (
-    select 1 from pg_publication_rel pr 
-    join pg_class c on pr.prrelid = c.oid 
-    join pg_publication p on pr.prpubid = p.oid 
-    where p.pubname = 'supabase_realtime' and c.relname = 'goals'
-  ) then
-    alter publication supabase_realtime add table goals;
-  end if;
+do $$ begin
+  alter publication supabase_realtime add table public.notes;
+exception
+  when duplicate_object then null;
+  when undefined_table then null;
+end $$;
 
-  -- Add reflections table safely
-  if not exists (
-    select 1 from pg_publication_rel pr 
-    join pg_class c on pr.prrelid = c.oid 
-    join pg_publication p on pr.prpubid = p.oid 
-    where p.pubname = 'supabase_realtime' and c.relname = 'reflections'
-  ) then
-    alter publication supabase_realtime add table reflections;
-  end if;
+do $$ begin
+  alter publication supabase_realtime add table public.goals;
+exception
+  when duplicate_object then null;
+  when undefined_table then null;
+end $$;
 
-  -- Add vault_entries table safely
-  if not exists (
-    select 1 from pg_publication_rel pr 
-    join pg_class c on pr.prrelid = c.oid 
-    join pg_publication p on pr.prpubid = p.oid 
-    where p.pubname = 'supabase_realtime' and c.relname = 'vault_entries'
-  ) then
-    alter publication supabase_realtime add table vault_entries;
-  end if;
+do $$ begin
+  alter publication supabase_realtime add table public.reflections;
+exception
+  when duplicate_object then null;
+  when undefined_table then null;
+end $$;
 
-  -- Add price_articles table safely
-  if not exists (
-    select 1 from pg_publication_rel pr 
-    join pg_class c on pr.prrelid = c.oid 
-    join pg_publication p on pr.prpubid = p.oid 
-    where p.pubname = 'supabase_realtime' and c.relname = 'price_articles'
-  ) then
-    alter publication supabase_realtime add table price_articles;
-  end if;
+do $$ begin
+  alter publication supabase_realtime add table public.vault_entries;
+exception
+  when duplicate_object then null;
+  when undefined_table then null;
+end $$;
+
+do $$ begin
+  alter publication supabase_realtime add table public.price_articles;
+exception
+  when duplicate_object then null;
+  when undefined_table then null;
 end $$;`}
                   </pre>
                   
