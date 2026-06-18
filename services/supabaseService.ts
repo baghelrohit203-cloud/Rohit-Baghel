@@ -235,12 +235,12 @@ export const subscribeToSupabaseCollections = (
       callbacks.onSyncStateChange(true, 'Pulling user tables from Supabase...');
       
       const [
-        { data: activitiesData },
-        { data: notesData },
-        { data: goalsData },
-        { data: reflectionsData },
-        { data: vaultData },
-        { data: priceData }
+        resActivities,
+        resNotes,
+        resGoals,
+        resReflections,
+        resVault,
+        resPrice
       ] = await Promise.all([
         client.from('activities').select('*').eq('user_id', userId),
         client.from('notes').select('*').eq('user_id', userId),
@@ -250,12 +250,31 @@ export const subscribeToSupabaseCollections = (
         client.from('price_articles').select('*').eq('user_id', userId)
       ]);
 
-      if (activitiesData) callbacks.onActivitiesUpdate(activitiesData.map(mapActivity));
-      if (notesData) callbacks.onNotesUpdate(notesData.map(mapNote));
-      if (goalsData) callbacks.onGoalsUpdate(goalsData.map(mapGoal));
-      if (reflectionsData) callbacks.onReflectionUpdate(reflectionsData.content || '');
-      if (vaultData) callbacks.onVaultUpdate(vaultData.map(mapVault));
-      if (priceData) callbacks.onWatchlistUpdate(priceData.map(mapPriceArticle));
+      const errors = [
+        resActivities.error,
+        resNotes.error,
+        resGoals.error,
+        resReflections.error,
+        resVault.error,
+        resPrice.error
+      ].filter(Boolean);
+
+      if (errors.length > 0) {
+        const isMissingRelationObj = errors.find(err => err && (err.code === '42P01' || err.message?.includes('does not exist')));
+        if (isMissingRelationObj) {
+          callbacks.onSyncStateChange(false, 'Sync Warning: Tables missing in Supabase. Click "Credentials" to run SQL script.');
+          return;
+        }
+        callbacks.onSyncStateChange(false, `Sync Error: ${errors[0]?.message || 'Unknown error'}`);
+        return;
+      }
+
+      if (resActivities.data) callbacks.onActivitiesUpdate(resActivities.data.map(mapActivity));
+      if (resNotes.data) callbacks.onNotesUpdate(resNotes.data.map(mapNote));
+      if (resGoals.data) callbacks.onGoalsUpdate(resGoals.data.map(mapGoal));
+      if (resReflections.data) callbacks.onReflectionUpdate(resReflections.data.content || '');
+      if (resVault.data) callbacks.onVaultUpdate(resVault.data.map(mapVault));
+      if (resPrice.data) callbacks.onWatchlistUpdate(resPrice.data.map(mapPriceArticle));
 
       callbacks.onSyncStateChange(false, 'Synced with Supabase Cloud');
     } catch (e: any) {
