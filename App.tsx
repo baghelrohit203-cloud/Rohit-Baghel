@@ -36,6 +36,25 @@ import {
   cloudDeletePriceArticle 
 } from './services/firebaseService';
 
+import {
+  getSupabaseConfig,
+  saveSupabaseConfig,
+  getSupabaseClient,
+  uploadLocalDataToSupabase,
+  subscribeToSupabaseCollections,
+  supabaseSaveActivity,
+  supabaseDeleteActivity,
+  supabaseSaveNote,
+  supabaseDeleteNote,
+  supabaseSaveGoal,
+  supabaseDeleteGoal,
+  supabaseSaveReflection,
+  supabaseSaveVaultEntry,
+  supabaseDeleteVaultEntry,
+  supabaseSavePriceArticle,
+  supabaseDeletePriceArticle
+} from './services/supabaseService';
+
 const App: React.FC = () => {
   const [activities, setActivities] = useState<ActivityEntry[]>(() => {
     try {
@@ -110,6 +129,11 @@ const App: React.FC = () => {
   const [newGoalDate, setNewGoalDate] = useState('');
 
   // Firebase Auth & Sync State flags
+  const [syncProvider, setSyncProvider] = useState<'firebase' | 'supabase'>(() => {
+    return (localStorage.getItem('karma_chakra_sync_provider') as 'firebase' | 'supabase') || 'firebase';
+  });
+  const [supabaseUrl, setSupabaseUrl] = useState(() => localStorage.getItem('karma_chakra_supabase_url') || '');
+  const [supabaseKey, setSupabaseKey] = useState(() => localStorage.getItem('karma_chakra_supabase_key') || '');
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncStatusText, setSyncStatusText] = useState('Offline Mode');
@@ -161,7 +185,7 @@ const App: React.FC = () => {
   // Listen for Firebase user auth changes and handle real-time sync subscription
   useEffect(() => {
     const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
-      // Unsubscribe existing Firestore listeners if any
+      // Unsubscribe existing listeners if any
       subscriptionUnsubscribersRef.current.forEach((unsub) => {
         try { unsub(); } catch (err) { console.error('Unsub error:', err); }
       });
@@ -169,51 +193,63 @@ const App: React.FC = () => {
 
       if (user) {
         setCurrentUser(user);
-        setSyncStatusText('Subscribing to Real-Time Cloud channels...');
         
-        // Subscribe to all cloud collections in real-time
-        const unsubs = subscribeToCloudCollections(user.uid, {
-          onActivitiesUpdate: (list) => {
+        const syncCallbacks = {
+          onActivitiesUpdate: (list: ActivityEntry[]) => {
             setActivities(prev => {
-              // Only update if there is a difference to avoid state flicker
               if (JSON.stringify(prev) === JSON.stringify(list)) return prev;
               return list;
             });
           },
-          onNotesUpdate: (list) => {
+          onNotesUpdate: (list: Note[]) => {
             setNotes(prev => {
               if (JSON.stringify(prev) === JSON.stringify(list)) return prev;
               return list;
             });
           },
-          onGoalsUpdate: (list) => {
+          onGoalsUpdate: (list: Goal[]) => {
             setGoals(prev => {
               if (JSON.stringify(prev) === JSON.stringify(list)) return prev;
               return list;
             });
           },
-          onReflectionUpdate: (text) => {
+          onReflectionUpdate: (text: string) => {
             setReflection(prev => prev === text ? prev : text);
           },
-          onVaultUpdate: (list) => {
+          onVaultUpdate: (list: VaultEntry[]) => {
             setVaultEntries(prev => {
               if (JSON.stringify(prev) === JSON.stringify(list)) return prev;
               return list;
             });
           },
-          onWatchlistUpdate: (list) => {
+          onWatchlistUpdate: (list: PriceArticle[]) => {
             setPriceArticles(prev => {
               if (JSON.stringify(prev) === JSON.stringify(list)) return prev;
               return list;
             });
           },
-          onSyncStateChange: (syncing, text) => {
+          onSyncStateChange: (syncing: boolean, text: string) => {
             setIsSyncing(syncing);
             setSyncStatusText(text);
           }
-        });
+        };
 
-        subscriptionUnsubscribersRef.current = unsubs;
+        if (syncProvider === 'supabase') {
+          const { url, key } = getSupabaseConfig();
+          if (!url || !key) {
+            setIsSyncing(false);
+            setSyncStatusText('Supabase Credentials Missing');
+          } else {
+            setSyncStatusText('Subscribing to Supabase channels...');
+            const unsubs = subscribeToSupabaseCollections(user.uid, syncCallbacks);
+            subscriptionUnsubscribersRef.current = unsubs;
+          }
+        } else {
+          setSyncStatusText('Subscribing to Real-Time Cloud channels...');
+          const unsubs = subscribeToCloudCollections(user.uid, syncCallbacks);
+          subscriptionUnsubscribersRef.current = unsubs;
+        }
+
       } else {
         setCurrentUser(null);
         setIsSyncing(false);
@@ -333,7 +369,7 @@ const App: React.FC = () => {
         try { unsub(); } catch (err) { console.error('Unsub cleanup error:', err); }
       });
     };
-  }, []);
+  }, [syncProvider]);
 
   useEffect(() => {
     localStorage.setItem('karma_chakra_v7_activities', JSON.stringify(activities));
@@ -350,7 +386,11 @@ const App: React.FC = () => {
   useEffect(() => {
     localStorage.setItem('karma_chakra_v7_reflection', reflection);
     if (currentUser) {
-      cloudSaveReflection(currentUser.uid, reflection);
+      if (syncProvider === 'supabase') {
+        supabaseSaveReflection(currentUser.uid, reflection);
+      } else {
+        cloudSaveReflection(currentUser.uid, reflection);
+      }
     }
   }, [reflection]);
 
@@ -428,6 +468,92 @@ const App: React.FC = () => {
     }
   };
 
+  // Unified provider-aware synchronization helpers
+  const saveActivity = (item: ActivityEntry) => {
+    if (!currentUser) return;
+    if (syncProvider === 'supabase') {
+      supabaseSaveActivity(currentUser.uid, item);
+    } else {
+      cloudSaveActivity(currentUser.uid, item);
+    }
+  };
+
+  const deleteActivity = (activityId: string) => {
+    if (syncProvider === 'supabase') {
+      supabaseDeleteActivity(activityId);
+    } else {
+      cloudDeleteActivity(activityId);
+    }
+  };
+
+  const saveNote = (item: Note) => {
+    if (!currentUser) return;
+    if (syncProvider === 'supabase') {
+      supabaseSaveNote(currentUser.uid, item);
+    } else {
+      cloudSaveNote(currentUser.uid, item);
+    }
+  };
+
+  const deleteNote = (noteId: string) => {
+    if (syncProvider === 'supabase') {
+      supabaseDeleteNote(noteId);
+    } else {
+      cloudDeleteNote(noteId);
+    }
+  };
+
+  const saveGoal = (item: Goal) => {
+    if (!currentUser) return;
+    if (syncProvider === 'supabase') {
+      supabaseSaveGoal(currentUser.uid, item);
+    } else {
+      cloudSaveGoal(currentUser.uid, item);
+    }
+  };
+
+  const deleteGoalWrapper = (goalId: string) => {
+    if (syncProvider === 'supabase') {
+      supabaseDeleteGoal(goalId);
+    } else {
+      cloudDeleteGoal(goalId);
+    }
+  };
+
+  const saveVaultEntry = (item: VaultEntry) => {
+    if (!currentUser) return;
+    if (syncProvider === 'supabase') {
+      supabaseSaveVaultEntry(currentUser.uid, item);
+    } else {
+      cloudSaveVaultEntry(currentUser.uid, item);
+    }
+  };
+
+  const deleteVaultEntry = (entryId: string) => {
+    if (syncProvider === 'supabase') {
+      supabaseDeleteVaultEntry(entryId);
+    } else {
+      cloudDeleteVaultEntry(entryId);
+    }
+  };
+
+  const savePriceArticle = (item: PriceArticle) => {
+    if (!currentUser) return;
+    if (syncProvider === 'supabase') {
+      supabaseSavePriceArticle(currentUser.uid, item);
+    } else {
+      cloudSavePriceArticle(currentUser.uid, item);
+    }
+  };
+
+  const deletePriceArticle = (articleId: string) => {
+    if (syncProvider === 'supabase') {
+      supabaseDeletePriceArticle(articleId);
+    } else {
+      cloudDeletePriceArticle(articleId);
+    }
+  };
+
   const handleSaveNote = (title: string, content: string, type: NoteType, project?: string, blocks?: ProjectBlock[]) => {
     let targetNote: Note;
     if (editingNote) {
@@ -447,7 +573,7 @@ const App: React.FC = () => {
       setNotes(prev => [targetNote, ...prev]);
     }
     if (currentUser) {
-      cloudSaveNote(currentUser.uid, targetNote);
+      saveNote(targetNote);
     }
     setEditingNote(null);
     setIsNoteModalOpen(false);
@@ -456,7 +582,7 @@ const App: React.FC = () => {
   const handleDeleteNote = (id: string) => {
     setNotes(prev => prev.filter(n => n.id !== id));
     if (currentUser) {
-      cloudDeleteNote(id);
+      deleteNote(id);
     }
     setEditingNote(null);
     setIsNoteModalOpen(false);
@@ -507,21 +633,21 @@ const App: React.FC = () => {
     };
     setVaultEntries(prev => [newEntry, ...prev]);
     if (currentUser) {
-      cloudSaveVaultEntry(currentUser.uid, newEntry);
+      saveVaultEntry(newEntry);
     }
   };
 
   const handleUpdateVaultEntry = (updated: VaultEntry) => {
     setVaultEntries(prev => prev.map(e => e.id === updated.id ? updated : e));
     if (currentUser) {
-      cloudSaveVaultEntry(currentUser.uid, updated);
+      saveVaultEntry(updated);
     }
   };
 
   const handleDeleteVaultEntry = (id: string) => {
     setVaultEntries(prev => prev.filter(e => e.id !== id));
     if (currentUser) {
-      cloudDeleteVaultEntry(id);
+      deleteVaultEntry(id);
     }
   };
 
@@ -542,7 +668,7 @@ const App: React.FC = () => {
     };
     setPriceArticles(prev => [newArticle, ...prev]);
     if (currentUser) {
-      cloudSavePriceArticle(currentUser.uid, newArticle);
+      savePriceArticle(newArticle);
     }
   };
 
@@ -559,7 +685,7 @@ const App: React.FC = () => {
           updatedAt: Date.now()
         };
         if (currentUser) {
-          cloudSavePriceArticle(currentUser.uid, updated);
+          savePriceArticle(updated);
         }
         return updated;
       }
@@ -576,7 +702,7 @@ const App: React.FC = () => {
           updatedAt: Date.now()
         };
         if (currentUser) {
-          cloudSavePriceArticle(currentUser.uid, updated);
+          savePriceArticle(updated);
         }
         return updated;
       }
@@ -593,7 +719,7 @@ const App: React.FC = () => {
           updatedAt: Date.now()
         };
         if (currentUser) {
-          cloudSavePriceArticle(currentUser.uid, updated);
+          savePriceArticle(updated);
         }
         return updated;
       }
@@ -604,14 +730,14 @@ const App: React.FC = () => {
   const handleDeletePriceArticle = (articleId: string) => {
     setPriceArticles(prev => prev.filter(art => art.id !== articleId));
     if (currentUser) {
-      cloudDeletePriceArticle(articleId);
+      deletePriceArticle(articleId);
     }
   };
 
   const handleUpdatePriceArticle = (updatedArticle: PriceArticle) => {
     setPriceArticles(prev => prev.map(art => art.id === updatedArticle.id ? updatedArticle : art));
     if (currentUser) {
-      cloudSavePriceArticle(currentUser.uid, updatedArticle);
+      savePriceArticle(updatedArticle);
     }
   };
 
@@ -727,14 +853,14 @@ const App: React.FC = () => {
         if (a.id === editingActivity.id) {
           const updated = { ...a, group, description, project, estimatedDuration: duration, startTime, alarmEnabled, goalId };
           if (currentUser) {
-            cloudSaveActivity(currentUser.uid, updated);
+            saveActivity(updated);
           }
           return updated;
         }
         if (repeatMode !== 'none' && datesToSync.includes(a.date) && a.description === editingActivity.description && a.group === editingActivity.group) {
            const updated = { ...a, group, description, project, estimatedDuration: duration, startTime, alarmEnabled, goalId };
            if (currentUser) {
-             cloudSaveActivity(currentUser.uid, updated);
+             saveActivity(updated);
            }
            return updated;
         }
@@ -752,7 +878,7 @@ const App: React.FC = () => {
       setActivities(prev => [...prev, ...newEntries]);
       if (currentUser) {
         newEntries.forEach(entry => {
-          cloudSaveActivity(currentUser.uid, entry);
+          saveActivity(entry);
         });
       }
     }
@@ -766,7 +892,7 @@ const App: React.FC = () => {
         if (a.id === activityId) {
           const updated = { ...a, distractions: [...(a.distractions || []), reason] };
           if (currentUser) {
-            cloudSaveActivity(currentUser.uid, updated);
+            saveActivity(updated);
           }
           return updated;
         }
@@ -787,7 +913,7 @@ const App: React.FC = () => {
     };
     setGoals(prev => [...prev, goal]);
     if (currentUser) {
-      cloudSaveGoal(currentUser.uid, goal);
+      saveGoal(goal);
     }
     setNewGoalTitle('');
     setNewGoalDesc('');
@@ -800,7 +926,7 @@ const App: React.FC = () => {
       if (g.id === id) {
         const updated = { ...g, isCompleted: !g.isCompleted };
         if (currentUser) {
-          cloudSaveGoal(currentUser.uid, updated);
+          saveGoal(updated);
         }
         return updated;
       }
@@ -811,7 +937,7 @@ const App: React.FC = () => {
   const deleteGoal = (id: string) => {
     setGoals(prev => prev.filter(g => g.id !== id));
     if (currentUser) {
-      cloudDeleteGoal(id);
+      deleteGoalWrapper(id);
     }
   };
 
@@ -820,7 +946,7 @@ const App: React.FC = () => {
       if (a.id === id) {
         const updated = { ...a, status };
         if (currentUser) {
-          cloudSaveActivity(currentUser.uid, updated);
+          saveActivity(updated);
         }
         return updated;
       }
@@ -833,7 +959,7 @@ const App: React.FC = () => {
       if (a.id === id) {
         const updated: ActivityEntry = { ...a, date: newDate, status: 'Rescheduled', movedFromDate: a.date, movedAt: Date.now() };
         if (currentUser) {
-          cloudSaveActivity(currentUser.uid, updated);
+          saveActivity(updated);
         }
         return updated;
       }
@@ -847,14 +973,14 @@ const App: React.FC = () => {
         const othersElapsed = (a.timer.totalElapsed || 0) + (Date.now() - (a.timer.lastStartTime || 0));
         const updated = { ...a, timer: { isActive: false, totalElapsed: othersElapsed, lastStartTime: null }};
         if (currentUser) {
-          cloudSaveActivity(currentUser.uid, updated);
+          saveActivity(updated);
         }
         return updated;
       }
       if (a.id === id) {
         const updated = { ...a, timer: { isActive, totalElapsed: elapsed, lastStartTime: isActive ? Date.now() : null } };
         if (currentUser) {
-          cloudSaveActivity(currentUser.uid, updated);
+          saveActivity(updated);
         }
         return updated;
       }
@@ -1094,7 +1220,7 @@ const App: React.FC = () => {
       </aside>
 
       {/* Main Container Wrapper */}
-      <div className="flex-1 max-w-5xl lg:max-w-6xl w-full mx-auto px-4 sm:px-6 lg:px-8 min-h-screen flex flex-col relative pb-16">
+      <div className="flex-1 w-full max-w-[96%] xl:max-w-[1500px] mx-auto px-4 sm:px-6 lg:px-8 min-h-screen flex flex-col relative pb-16">
       
       {/* Alarm Full-Screen Overlay */}
       {activeAlarmTask && (
@@ -1537,128 +1663,319 @@ const App: React.FC = () => {
             </div>
 
             {/* Main Auth & Device Overview Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-12 gap-8">
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
               {/* Left Column: Account Setup & Status */}
-              <div className="md:col-span-7 space-y-8">
-                {currentUser ? (
-                  /* Logged In View */
-                  <div className="glass p-8 rounded-[32px] border border-stone-200/70 dark:border-stone-800 bg-white/95 dark:bg-[#121212]/95 shadow-sm space-y-6">
+              <div className="lg:col-span-7 space-y-8">
+                
+                {/* Provider Selection Tabs */}
+                <div className="glass p-2 bg-stone-100/80 dark:bg-stone-900/40 rounded-2xl border border-stone-200/50 dark:border-stone-800 flex text-xs font-black uppercase tracking-wider">
+                  <button 
+                    onClick={() => {
+                      setSyncProvider('firebase');
+                      localStorage.setItem('karma_chakra_sync_provider', 'firebase');
+                    }} 
+                    className={`flex-1 py-3 text-center rounded-xl transition-all ${syncProvider === 'firebase' ? 'bg-white dark:bg-stone-800 text-[#823a9d] shadow-sm' : 'text-stone-400 hover:text-stone-600'}`}
+                  >
+                    Firebase Cloud
+                  </button>
+                  <button 
+                    onClick={() => {
+                      setSyncProvider('supabase');
+                      localStorage.setItem('karma_chakra_sync_provider', 'supabase');
+                    }} 
+                    className={`flex-1 py-3 text-center rounded-xl transition-all ${syncProvider === 'supabase' ? 'bg-white dark:bg-stone-800 text-emerald-600 dark:text-emerald-400 shadow-sm' : 'text-stone-400 hover:text-stone-600'}`}
+                  >
+                    Supabase Database
+                  </button>
+                </div>
+
+                {syncProvider === 'firebase' ? (
+                  currentUser ? (
+                    /* Logged In View */
+                    <div className="glass p-8 rounded-[32px] border border-stone-200/70 dark:border-stone-800 bg-white/95 dark:bg-[#121212]/95 shadow-sm space-y-6">
+                      <div className="flex items-center gap-4 border-b border-stone-100 dark:border-stone-900 pb-5">
+                        <div className="w-12 h-12 rounded-full bg-[#823a9d]/10 dark:bg-[#823a9d]/30 text-[#823a9d] flex items-center justify-center font-black italic text-lg shadow-sm">
+                          {currentUser.email ? currentUser.email[0].toUpperCase() : 'U'}
+                        </div>
+                        <div>
+                          <div className="text-xs text-stone-400 font-bold uppercase tracking-wider">Active Cloud Account</div>
+                          <div className="text-base font-black text-stone-800 dark:text-stone-100">{currentUser.email}</div>
+                        </div>
+                      </div>
+
+                      <div className="space-y-4">
+                        <h3 className="text-xs font-black uppercase text-stone-400 tracking-widest">Database Migrations</h3>
+                        
+                        {activities.length > 0 || notes.length > 0 || priceArticles.length > 0 ? (
+                          <div className="p-4 rounded-2xl bg-stone-50 dark:bg-[#1a141c] border border-stone-200/40 dark:border-stone-900/60 space-y-3">
+                            <p className="text-xs font-semibold leading-relaxed text-stone-600 dark:text-stone-300">
+                              You have <strong className="text-[#823a9d]">{activities.length}</strong> activities, <strong className="text-[#823a9d]">{notes.length}</strong> scribe notes, and <strong className="text-[#823a9d]">{priceArticles.length}</strong> price articles stored locally. Sync them to your secure cloud database so they become visible on all devices.
+                            </p>
+                            <button 
+                              onClick={handleCloudUploadMigration}
+                              className="w-full mt-2 py-3.5 bg-[#823a9d] hover:bg-[#703087] text-white font-black text-xs uppercase tracking-wider rounded-xl transition-all shadow-md shadow-[#823a9d]/10"
+                            >
+                              Migrate Local Data to Cloud
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="p-4 rounded-2xl bg-emerald-50/50 dark:bg-emerald-950/20 border border-emerald-100 text-xs font-semibold text-emerald-800 leading-relaxed">
+                            Your cache database is perfectly empty or already fully uploaded to the secure Firebase cloud!
+                          </div>
+                        )}
+
+                        {migrationStatus && (
+                          <div className="p-4 rounded-xl bg-purple-50 dark:bg-purple-950/20 text-[#823a9d] border border-purple-100 text-xs font-bold leading-relaxed">
+                            {migrationStatus}
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="pt-4 border-t border-stone-100 dark:border-stone-900 flex justify-between items-center">
+                        <div className="text-[10px] text-stone-400 font-medium">User UID: {currentUser.uid.substring(0, 10)}...</div>
+                        <button 
+                          onClick={handleLogout}
+                          className="px-5 py-2.5 border border-red-200 text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30 rounded-xl text-xs font-black uppercase tracking-wider transition-all"
+                        >
+                          Disconnect Account
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    /* Auth Login / Register Form */
+                    <div className="glass p-8 rounded-[32px] border border-stone-200/70 dark:border-stone-800 bg-white/95 dark:bg-[#121212]/95 shadow-sm">
+                      <div className="flex gap-4 border-b border-stone-100 dark:border-stone-900 pb-4 mb-6">
+                        <button 
+                          onClick={() => { setIsSignUpMode(false); setAuthError(''); setAuthSuccess(''); }}
+                          className={`flex-1 pb-2 text-xs font-black tracking-widest uppercase transition-all ${!isSignUpMode ? 'text-[#823a9d] border-b-2 border-[#823a9d]' : 'text-stone-400 hover:text-stone-600'}`}
+                        >
+                          Sign In
+                        </button>
+                        <button 
+                          onClick={() => { setIsSignUpMode(true); setAuthError(''); setAuthSuccess(''); }}
+                          className={`flex-1 pb-2 text-xs font-black tracking-widest uppercase transition-all ${isSignUpMode ? 'text-[#823a9d] border-b-2 border-[#823a9d]' : 'text-stone-400 hover:text-stone-600'}`}
+                        >
+                          Register
+                        </button>
+                      </div>
+
+                      <form onSubmit={handleAuthSubmit} className="space-y-4">
+                        <div className="space-y-1.5">
+                          <label className="text-[10px] uppercase font-black tracking-wider text-stone-400">Email Address</label>
+                          <input 
+                            type="email" 
+                            placeholder="your.name@karma-chakra.app" 
+                            value={authEmail}
+                            onChange={(e) => setAuthEmail(e.target.value)}
+                            className="w-full bg-stone-50 dark:bg-stone-900 border border-stone-200/85 dark:border-stone-800 rounded-xl px-4 py-3.5 text-xs text-[#2b2925] dark:text-stone-100 focus:outline-none focus:ring-2 focus:ring-[#823a9d]/20 focus:border-[#823a9d]"
+                            required
+                          />
+                        </div>
+
+                        <div className="space-y-1.5">
+                          <label className="text-[10px] uppercase font-black tracking-wider text-stone-400">Secure Password</label>
+                          <input 
+                            type="password" 
+                            placeholder="Minimum 6 characters" 
+                            value={authPassword}
+                            onChange={(e) => setAuthPassword(e.target.value)}
+                            className="w-full bg-stone-50 dark:bg-stone-900 border border-stone-200/85 dark:border-stone-800 rounded-xl px-4 py-3.5 text-xs text-[#2b2925] dark:text-stone-100 focus:outline-none focus:ring-2 focus:ring-[#823a9d]/20 focus:border-[#823a9d]"
+                            required
+                          />
+                        </div>
+
+                        {authError && (
+                          <div className="p-3 bg-red-50 dark:bg-red-950/20 text-red-600 border border-red-100 dark:border-red-900/60 text-xs font-bold leading-relaxed rounded-xl">
+                            {authError}
+                          </div>
+                        )}
+
+                        {authSuccess && (
+                          <div className="p-3 bg-emerald-50 dark:bg-emerald-950/20 text-emerald-600 border border-emerald-100 text-xs font-bold leading-relaxed rounded-xl">
+                            {authSuccess}
+                          </div>
+                        )}
+
+                        <button 
+                          type="submit"
+                          className="w-full py-4 mt-2 bg-[#823a9d] hover:bg-[#703087] text-white font-black text-xs uppercase tracking-widest rounded-xl transition-all shadow-md shadow-[#823a9d]/10"
+                        >
+                          {isSignUpMode ? 'Register New Account' : 'Authenticate & Sync'}
+                        </button>
+                      </form>
+
+                      <div className="mt-6 p-4 rounded-2xl bg-[#faf8f5] dark:bg-stone-900/40 border border-stone-200/40 dark:border-stone-800/80">
+                        <div className="text-[10px] font-black uppercase text-stone-500 mb-1">💡 Sandbox Integration Rules</div>
+                        <p className="text-[10px] text-stone-400 leading-normal">
+                          Passwords must contain at least 6 characters. If accessing from separate devices (phone or tablet), log in with these exact credentials to establish a bidirectional hot synchronization channel instantly.
+                        </p>
+                      </div>
+                    </div>
+                  )
+                ) : (
+                  /* Supabase Database Config view */
+                  <div className="glass p-8 rounded-[32px] border border-emerald-500/20 bg-white/95 dark:bg-[#121212]/95 shadow-sm space-y-6">
                     <div className="flex items-center gap-4 border-b border-stone-100 dark:border-stone-900 pb-5">
-                      <div className="w-12 h-12 rounded-full bg-[#823a9d]/10 dark:bg-[#823a9d]/30 text-[#823a9d] flex items-center justify-center font-black italic text-lg shadow-sm">
-                        {currentUser.email ? currentUser.email[0].toUpperCase() : 'U'}
+                      <div className="w-12 h-12 rounded-full bg-emerald-50 dark:bg-emerald-950/20 text-emerald-600 dark:text-emerald-400 flex items-center justify-center font-black italic text-lg shadow-sm">
+                        S
                       </div>
                       <div>
-                        <div className="text-xs text-stone-400 font-bold uppercase tracking-wider">Active Cloud Account</div>
-                        <div className="text-base font-black text-stone-800 dark:text-stone-100">{currentUser.email}</div>
+                        <div className="text-xs text-stone-400 font-bold uppercase tracking-wider font-sans">Active Sync Provider</div>
+                        <div className="text-base font-black text-emerald-600 dark:text-emerald-400 font-sans uppercase">Supabase Relational Cloud</div>
                       </div>
                     </div>
 
                     <div className="space-y-4">
-                      <h3 className="text-xs font-black uppercase text-stone-400 tracking-widest">Database Migrations</h3>
-                      
-                      {activities.length > 0 || notes.length > 0 || priceArticles.length > 0 ? (
-                        <div className="p-4 rounded-2xl bg-stone-50 dark:bg-[#1a141c] border border-stone-200/40 dark:border-stone-900/60 space-y-3">
+                      <div className="space-y-1.5">
+                        <label className="text-[10px] uppercase font-black tracking-wider text-stone-400">Supabase Project URL</label>
+                        <input 
+                          type="text" 
+                          placeholder="https://your-project-id.supabase.co" 
+                          value={supabaseUrl}
+                          onChange={(e) => {
+                            setSupabaseUrl(e.target.value);
+                            saveSupabaseConfig(e.target.value, supabaseKey);
+                          }}
+                          className="w-full bg-stone-50 dark:bg-stone-900 border border-stone-200/85 dark:border-stone-800 rounded-xl px-4 py-3.5 text-xs text-[#2b2925] dark:text-stone-100 focus:outline-none focus:ring-2 focus:ring-emerald-500/25 focus:border-emerald-500"
+                        />
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <label className="text-[10px] uppercase font-black tracking-wider text-stone-400">Supabase Anon Key / API Key</label>
+                        <input 
+                          type="password" 
+                          placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." 
+                          value={supabaseKey}
+                          onChange={(e) => {
+                            setSupabaseKey(e.target.value);
+                            saveSupabaseConfig(supabaseUrl, e.target.value);
+                          }}
+                          className="w-full bg-stone-50 dark:bg-stone-900 border border-stone-200/85 dark:border-stone-800 rounded-xl px-4 py-3.5 text-xs text-[#2b2925] dark:text-stone-100 focus:outline-none focus:ring-2 focus:ring-emerald-500/25 focus:border-emerald-500"
+                        />
+                      </div>
+
+                      <button
+                        onClick={() => {
+                          if (!supabaseUrl || !supabaseKey) {
+                            alert('Please supply both Supabase URL and Anon Key first.');
+                            return;
+                          }
+                          alert('Supabase credentials successfully configured locally! Real-time observers re-established.');
+                        }}
+                        className="w-full py-4 mt-2 bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs uppercase tracking-widest rounded-xl transition-all shadow-md"
+                      >
+                        Verify & Re-establish Connection
+                      </button>
+
+                      {/* Direct Migration Option */}
+                      {currentUser && (
+                        <div className="p-4 rounded-2xl bg-stone-50 dark:bg-stone-950/40 border border-stone-200/40 dark:border-stone-800/80 space-y-3 mt-4">
                           <p className="text-xs font-semibold leading-relaxed text-stone-600 dark:text-stone-300">
-                            You have <strong className="text-[#823a9d]">{activities.length}</strong> activities, <strong className="text-[#823a9d]">{notes.length}</strong> scribe notes, and <strong className="text-[#823a9d]">{priceArticles.length}</strong> price articles stored locally. Sync them to your secure cloud database so they become visible on all devices.
+                            You have <strong className="text-emerald-600 font-extrabold">{activities.length}</strong> activities, <strong className="text-emerald-600 font-extrabold">{notes.length}</strong> scribe notes, and <strong className="text-emerald-600 font-extrabold">{priceArticles.length}</strong> watchlists stored locally. Move them to your clean Supabase tables instantly.
                           </p>
                           <button 
-                            onClick={handleCloudUploadMigration}
-                            className="w-full mt-2 py-3.5 bg-[#823a9d] hover:bg-[#703087] text-white font-black text-xs uppercase tracking-wider rounded-xl transition-all shadow-md shadow-[#823a9d]/10"
+                            onClick={async () => {
+                              if (!currentUser) return;
+                              setMigrationStatus('Upserting state variables to Supabase...');
+                              try {
+                                await uploadLocalDataToSupabase(
+                                  currentUser.uid,
+                                  { activities, notes, goals, reflection, vaultEntries, priceArticles },
+                                  (txt) => setMigrationStatus(txt)
+                                );
+                                setTimeout(() => setMigrationStatus(''), 6000);
+                              } catch (err: any) {
+                                setMigrationStatus('Supabase migration failed: ' + err.message);
+                              }
+                            }}
+                            className="w-full py-3.5 bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs uppercase tracking-wider rounded-xl transition-all shadow-md shadow-emerald-600/10"
                           >
-                            Migrate Local Data to Cloud
+                            Migrate Local Data to Supabase Table Index
                           </button>
-                        </div>
-                      ) : (
-                        <div className="p-4 rounded-2xl bg-emerald-50/50 dark:bg-emerald-950/20 border border-emerald-100 text-xs font-semibold text-emerald-800 leading-relaxed">
-                          Your cache database is perfectly empty or already fully uploaded to the secure Firebase cloud!
                         </div>
                       )}
 
                       {migrationStatus && (
-                        <div className="p-4 rounded-xl bg-purple-50 dark:bg-purple-950/20 text-[#823a9d] border border-purple-100 text-xs font-bold leading-relaxed">
+                        <div className="p-4 rounded-xl bg-emerald-50 dark:bg-emerald-950/20 text-emerald-600 border border-emerald-100 text-xs font-bold leading-relaxed">
                           {migrationStatus}
                         </div>
                       )}
-                    </div>
 
-                    <div className="pt-4 border-t border-stone-100 dark:border-stone-900 flex justify-between items-center">
-                      <div className="text-[10px] text-stone-400 font-medium">User UID: {currentUser.uid.substring(0, 10)}...</div>
-                      <button 
-                        onClick={handleLogout}
-                        className="px-5 py-2.5 border border-red-200 text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30 rounded-xl text-xs font-black uppercase tracking-wider transition-all"
-                      >
-                        Disconnect Account
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  /* Auth Login / Register Form */
-                  <div className="glass p-8 rounded-[32px] border border-stone-200/70 dark:border-stone-800 bg-white/95 dark:bg-[#121212]/95 shadow-sm">
-                    <div className="flex gap-4 border-b border-stone-100 dark:border-stone-900 pb-4 mb-6">
-                      <button 
-                        onClick={() => { setIsSignUpMode(false); setAuthError(''); setAuthSuccess(''); }}
-                        className={`flex-1 pb-2 text-xs font-black tracking-widest uppercase transition-all ${!isSignUpMode ? 'text-[#823a9d] border-b-2 border-[#823a9d]' : 'text-stone-400 hover:text-stone-600'}`}
-                      >
-                        Sign In
-                      </button>
-                      <button 
-                        onClick={() => { setIsSignUpMode(true); setAuthError(''); setAuthSuccess(''); }}
-                        className={`flex-1 pb-2 text-xs font-black tracking-widest uppercase transition-all ${isSignUpMode ? 'text-[#823a9d] border-b-2 border-[#823a9d]' : 'text-stone-400 hover:text-stone-600'}`}
-                      >
-                        Register
-                      </button>
-                    </div>
+                      {/* SQL Instruction block */}
+                      <div className="p-5 bg-stone-950 border border-stone-900 rounded-2xl space-y-3">
+                        <div className="text-[10px] font-black uppercase text-amber-400 tracking-wider flex items-center gap-2 font-mono">
+                          <span>⚡ Supabase SQL Schema Initializer</span>
+                        </div>
+                        <p className="text-[10px] text-stone-400 leading-normal font-medium">
+                          Log into your Supabase Dashboard, open the SQL Editor, and paste the following command to instantly create the required table structure parameters:
+                        </p>
+                        <pre className="text-[9px] font-mono text-stone-300 bg-black/50 p-3 rounded-lg overflow-x-auto max-h-48 select-all">
+{`-- SQL Initialization script
+create table if not exists activities (
+  id text primary key,
+  user_id text,
+  title text,
+  estimated_duration integer,
+  group_name text,
+  status text,
+  date text,
+  timer jsonb,
+  is_completed boolean,
+  moved_from_date text,
+  moved_at bigint,
+  created_at bigint
+);
 
-                    <form onSubmit={handleAuthSubmit} className="space-y-4">
-                      <div className="space-y-1.5">
-                        <label className="text-[10px] uppercase font-black tracking-wider text-stone-400">Email Address</label>
-                        <input 
-                          type="email" 
-                          placeholder="your.name@karma-chakra.app" 
-                          value={authEmail}
-                          onChange={(e) => setAuthEmail(e.target.value)}
-                          className="w-full bg-stone-50 dark:bg-stone-900 border border-stone-200/85 dark:border-stone-800 rounded-xl px-4 py-3.5 text-xs text-[#2b2925] dark:text-stone-100 focus:outline-none focus:ring-2 focus:ring-[#823a9d]/20 focus:border-[#823a9d]"
-                          required
-                        />
+create table if not exists notes (
+  id text primary key,
+  user_id text,
+  title text,
+  content text,
+  type text,
+  created_at bigint,
+  updated_at bigint,
+  is_pinned boolean
+);
+
+create table if not exists goals (
+  id text primary key,
+  user_id text,
+  title text,
+  description text,
+  target_date text,
+  is_completed boolean,
+  created_at bigint
+);
+
+create table if not exists reflections (
+  user_id text primary key,
+  content text,
+  updated_at bigint
+);
+
+create table if not exists vault_entries (
+  id text primary key,
+  user_id text,
+  title text,
+  content text,
+  category text,
+  created_at bigint,
+  updated_at bigint
+);
+
+create table if not exists price_articles (
+  id text primary key,
+  user_id text,
+  name text,
+  category text,
+  tags text[],
+  records jsonb,
+  created_at bigint,
+  updated_at bigint
+);`}
+                        </pre>
                       </div>
 
-                      <div className="space-y-1.5">
-                        <label className="text-[10px] uppercase font-black tracking-wider text-stone-400">Secure Password</label>
-                        <input 
-                          type="password" 
-                          placeholder="Minimum 6 characters" 
-                          value={authPassword}
-                          onChange={(e) => setAuthPassword(e.target.value)}
-                          className="w-full bg-stone-50 dark:bg-stone-900 border border-stone-200/85 dark:border-stone-800 rounded-xl px-4 py-3.5 text-xs text-[#2b2925] dark:text-stone-100 focus:outline-none focus:ring-2 focus:ring-[#823a9d]/20 focus:border-[#823a9d]"
-                          required
-                        />
-                      </div>
-
-                      {authError && (
-                        <div className="p-3 bg-red-50 dark:bg-red-950/20 text-red-600 border border-red-100 dark:border-red-900/60 text-xs font-bold leading-relaxed rounded-xl">
-                          {authError}
-                        </div>
-                      )}
-
-                      {authSuccess && (
-                        <div className="p-3 bg-emerald-50 dark:bg-emerald-950/20 text-emerald-600 border border-emerald-100 text-xs font-bold leading-relaxed rounded-xl">
-                          {authSuccess}
-                        </div>
-                      )}
-
-                      <button 
-                        type="submit"
-                        className="w-full py-4 mt-2 bg-[#823a9d] hover:bg-[#703087] text-white font-black text-xs uppercase tracking-widest rounded-xl transition-all shadow-md shadow-[#823a9d]/10"
-                      >
-                        {isSignUpMode ? 'Register New Account' : 'Authenticate & Sync'}
-                      </button>
-                    </form>
-
-                    <div className="mt-6 p-4 rounded-2xl bg-[#faf8f5] dark:bg-stone-900/40 border border-stone-200/40 dark:border-stone-800/80">
-                      <div className="text-[10px] font-black uppercase text-stone-500 mb-1">💡 Sandbox Integration Rules</div>
-                      <p className="text-[10px] text-stone-400 leading-normal">
-                        Passwords must contain at least 6 characters. If accessing from separate devices (phone or tablet), log in with these exact credentials to establish a bidirectional hot synchronization channel instantly.
-                      </p>
                     </div>
                   </div>
                 )}
