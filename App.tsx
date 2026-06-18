@@ -130,8 +130,8 @@ const App: React.FC = () => {
 
   // Supabase Auth & Sync State flags
   const [syncProvider, setSyncProvider] = useState<'firebase' | 'supabase'>('supabase');
-  const [supabaseUrl, setSupabaseUrl] = useState(() => localStorage.getItem('karma_chakra_supabase_url') || '');
-  const [supabaseKey, setSupabaseKey] = useState(() => localStorage.getItem('karma_chakra_supabase_key') || '');
+  const [supabaseUrl, setSupabaseUrl] = useState(() => localStorage.getItem('karma_chakra_supabase_url') || 'https://igzwmydbmxlruocfgnmo.supabase.co');
+  const [supabaseKey, setSupabaseKey] = useState(() => localStorage.getItem('karma_chakra_supabase_key') || 'sb_publishable_yXH0OAkw6HE15lxEKvdozw_LGENqiNs');
   const [currentUser, setCurrentUser] = useState<{ uid: string; email?: string } | null>(null);
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncStatusText, setSyncStatusText] = useState('Offline Mode');
@@ -142,6 +142,21 @@ const App: React.FC = () => {
   const [isSignUpMode, setIsSignUpMode] = useState(false);
   const [migrationStatus, setMigrationStatus] = useState('');
   const subscriptionUnsubscribersRef = useRef<(() => void)[]>([]);
+
+  // Refs to prevent stale closures in Auth/Sync events
+  const activitiesRef = useRef(activities);
+  const notesRef = useRef(notes);
+  const goalsRef = useRef(goals);
+  const reflectionRef = useRef(reflection);
+  const vaultEntriesRef = useRef(vaultEntries);
+  const priceArticlesRef = useRef(priceArticles);
+
+  useEffect(() => { activitiesRef.current = activities; }, [activities]);
+  useEffect(() => { notesRef.current = notes; }, [notes]);
+  useEffect(() => { goalsRef.current = goals; }, [goals]);
+  useEffect(() => { reflectionRef.current = reflection; }, [reflection]);
+  useEffect(() => { vaultEntriesRef.current = vaultEntries; }, [vaultEntries]);
+  useEffect(() => { priceArticlesRef.current = priceArticles; }, [priceArticles]);
 
   const [isDark, setIsDark] = useState<boolean>(() => {
     const saved = localStorage.getItem('karma_chakra_dark_mode');
@@ -184,6 +199,8 @@ const App: React.FC = () => {
 
   // Listen for Supabase user auth changes and handle real-time sync subscription
   useEffect(() => {
+    let isCancelled = false;
+
     // Unsubscribe existing listeners if any
     subscriptionUnsubscribersRef.current.forEach((unsub) => {
       try { unsub(); } catch (err) { console.error('Unsub error:', err); }
@@ -214,53 +231,74 @@ const App: React.FC = () => {
     }
 
     const setupSync = (userId: string) => {
+      if (isCancelled) return;
       const syncCallbacks = {
         onActivitiesUpdate: (list: ActivityEntry[]) => {
+          if (isCancelled) return;
           setActivities(prev => {
             if (JSON.stringify(prev) === JSON.stringify(list)) return prev;
             return list;
           });
         },
         onNotesUpdate: (list: Note[]) => {
+          if (isCancelled) return;
           setNotes(prev => {
             if (JSON.stringify(prev) === JSON.stringify(list)) return prev;
             return list;
           });
         },
         onGoalsUpdate: (list: Goal[]) => {
+          if (isCancelled) return;
           setGoals(prev => {
             if (JSON.stringify(prev) === JSON.stringify(list)) return prev;
             return list;
           });
         },
         onReflectionUpdate: (text: string) => {
+          if (isCancelled) return;
           setReflection(prev => prev === text ? prev : text);
         },
         onVaultUpdate: (list: VaultEntry[]) => {
+          if (isCancelled) return;
           setVaultEntries(prev => {
             if (JSON.stringify(prev) === JSON.stringify(list)) return prev;
             return list;
           });
         },
         onWatchlistUpdate: (list: PriceArticle[]) => {
+          if (isCancelled) return;
           setPriceArticles(prev => {
             if (JSON.stringify(prev) === JSON.stringify(list)) return prev;
             return list;
           });
         },
         onSyncStateChange: (syncing: boolean, text: string) => {
+          if (isCancelled) return;
           setIsSyncing(syncing);
           setSyncStatusText(text);
         }
       };
 
+      if (isCancelled) return;
       setSyncStatusText('Subscribing to Supabase channels...');
-      const unsubs = subscribeToSupabaseCollections(userId, syncCallbacks);
-      subscriptionUnsubscribersRef.current = unsubs;
+      const unsubs = subscribeToSupabaseCollections(userId, syncCallbacks, {
+        activities: activitiesRef.current,
+        notes: notesRef.current,
+        goals: goalsRef.current,
+        reflection: reflectionRef.current,
+        vaultEntries: vaultEntriesRef.current,
+        priceArticles: priceArticlesRef.current
+      });
+      if (isCancelled) {
+        unsubs.forEach(unsub => unsub());
+      } else {
+        subscriptionUnsubscribersRef.current = unsubs;
+      }
     };
 
     // Get current session
     client.auth.getSession().then(({ data: { session } }) => {
+      if (isCancelled) return;
       const user = session?.user;
       if (user) {
         setCurrentUser({
@@ -274,11 +312,13 @@ const App: React.FC = () => {
         setSyncStatusText('Offline Mode (Local Cache)');
       }
     }).catch(err => {
+      if (isCancelled) return;
       console.error('Supabase getSession error:', err);
     });
 
     // Subscribe to auth state changes
     const { data: { subscription } } = client.auth.onAuthStateChange((_event, session) => {
+      if (isCancelled) return;
       const user = session?.user;
       
       // Cleanup previous sync subscriptions on auth change
@@ -406,12 +446,14 @@ const App: React.FC = () => {
         }
 
     return () => {
+      isCancelled = true;
       if (subscription) {
         subscription.unsubscribe();
       }
       subscriptionUnsubscribersRef.current.forEach((unsub) => {
         try { unsub(); } catch (err) { console.error('Unsub cleanup error:', err); }
       });
+      subscriptionUnsubscribersRef.current = [];
     };
   }, [supabaseUrl, supabaseKey]);
 
@@ -1942,7 +1984,14 @@ create table if not exists public.activities (
   is_completed boolean,
   moved_from_date text,
   moved_at bigint,
-  created_at bigint
+  created_at bigint,
+  project text,
+  start_time text,
+  alarm_enabled boolean,
+  goal_id text,
+  distractions jsonb,
+  actual_duration integer,
+  rescheduled_to text
 );
 
 create table if not exists public.notes (
@@ -1953,7 +2002,9 @@ create table if not exists public.notes (
   type text,
   created_at bigint,
   updated_at bigint,
-  is_pinned boolean
+  is_pinned boolean,
+  project text,
+  blocks jsonb
 );
 
 create table if not exists public.goals (
@@ -1979,7 +2030,12 @@ create table if not exists public.vault_entries (
   content text,
   category text,
   created_at bigint,
-  updated_at bigint
+  updated_at bigint,
+  list_items jsonb,
+  date text,
+  project_tag text,
+  impact_rating integer,
+  status text
 );
 
 create table if not exists public.price_articles (
@@ -1993,7 +2049,58 @@ create table if not exists public.price_articles (
   updated_at bigint
 );
 
--- 2. Create Real-Time Publication safely
+-- Upgrade existing tables with missing columns (run if you already created tables earlier)
+alter table public.activities add column if not exists project text;
+alter table public.activities add column if not exists start_time text;
+alter table public.activities add column if not exists alarm_enabled boolean;
+alter table public.activities add column if not exists goal_id text;
+alter table public.activities add column if not exists distractions jsonb;
+alter table public.activities add column if not exists actual_duration integer;
+alter table public.activities add column if not exists rescheduled_to text;
+
+alter table public.notes add column if not exists project text;
+alter table public.notes add column if not exists blocks jsonb;
+
+alter table public.vault_entries add column if not exists list_items jsonb;
+alter table public.vault_entries add column if not exists date text;
+alter table public.vault_entries add column if not exists project_tag text;
+alter table public.vault_entries add column if not exists impact_rating integer;
+alter table public.vault_entries add column if not exists status text;
+
+-- 2. Enable Row Level Security (RLS) for all tables
+alter table public.activities enable row level security;
+alter table public.notes enable row level security;
+alter table public.goals enable row level security;
+alter table public.reflections enable row level security;
+alter table public.vault_entries enable row level security;
+alter table public.price_articles enable row level security;
+
+-- 3. Create native, secure policies using auth.uid()
+drop policy if exists "activities_session_owner" on public.activities;
+create policy "activities_session_owner" on public.activities
+  for all using (auth.uid()::text = user_id::text) with check (auth.uid()::text = user_id::text);
+
+drop policy if exists "notes_session_owner" on public.notes;
+create policy "notes_session_owner" on public.notes
+  for all using (auth.uid()::text = user_id::text) with check (auth.uid()::text = user_id::text);
+
+drop policy if exists "goals_session_owner" on public.goals;
+create policy "goals_session_owner" on public.goals
+  for all using (auth.uid()::text = user_id::text) with check (auth.uid()::text = user_id::text);
+
+drop policy if exists "reflections_session_owner" on public.reflections;
+create policy "reflections_session_owner" on public.reflections
+  for all using (auth.uid()::text = user_id::text) with check (auth.uid()::text = user_id::text);
+
+drop policy if exists "vault_entries_session_owner" on public.vault_entries;
+create policy "vault_entries_session_owner" on public.vault_entries
+  for all using (auth.uid()::text = user_id::text) with check (auth.uid()::text = user_id::text);
+
+drop policy if exists "price_articles_session_owner" on public.price_articles;
+create policy "price_articles_session_owner" on public.price_articles
+  for all using (auth.uid()::text = user_id::text) with check (auth.uid()::text = user_id::text);
+
+-- 4. Create Real-Time Publication safely
 do $$
 begin
   if not exists (select 1 from pg_publication where pubname = 'supabase_realtime') then
@@ -2003,7 +2110,7 @@ exception
   when others then null;
 end $$;
 
--- 3. Add tables to replication safely (handles already added / missing tables gracefully)
+-- 5. Add tables to replication safely (handles already added / missing tables gracefully)
 do $$ begin
   alter publication supabase_realtime add table public.activities;
 exception
