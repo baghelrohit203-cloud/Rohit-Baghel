@@ -576,6 +576,9 @@ export const VaultWorkspace: React.FC<VaultWorkspaceProps> = ({
         </span>
         <input 
           type="text"
+          autoComplete="off"
+          autoCorrect="off"
+          spellCheck={false}
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
           placeholder={`Search saved ${activeCategoryConfig?.label} entries (titles, content, tags)...`}

@@ -1060,6 +1060,9 @@ export const PriceWatchlist: React.FC<PriceWatchlistProps> = ({
           </span>
           <input 
             type="text"
+            autoComplete="off"
+            autoCorrect="off"
+            spellCheck={false}
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="Search price feeds (e.g., Alwar Onions, veggies, wholesale, Rajasthan)..."
