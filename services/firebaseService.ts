@@ -19,7 +19,7 @@ import {
   writeBatch,
   getDocs
 } from 'firebase/firestore';
-import { ActivityEntry, Note, Goal, VaultEntry, PriceArticle } from '../types';
+import { ActivityEntry, Note, Goal, VaultEntry, PriceArticle, ContentIndexEntry } from '../types';
 
 // Hardcoded verified configuration from firebase-applet-config.json for absolute compile-time reliability
 const firebaseConfig = {
@@ -273,4 +273,27 @@ export const cloudSavePriceArticle = async (userId: string, article: PriceArticl
 
 export const cloudDeletePriceArticle = async (articleId: string) => {
   await deleteDoc(doc(db, 'priceArticles', articleId));
+};
+
+export const cloudSaveContentIndexes = async (userId: string, items: ContentIndexEntry[]) => {
+  try {
+    const q = query(collection(db, 'contentIndexes'), where('userId', '==', userId));
+    const snapshot = await getDocs(q);
+    
+    // Batch delete existing indexes to avoid duplicates or orphans
+    const batch = writeBatch(db);
+    snapshot.forEach((d) => {
+      batch.delete(d.ref);
+    });
+    
+    // Add new ones
+    items.forEach((item) => {
+      const ref = doc(db, 'contentIndexes', item.id);
+      batch.set(ref, { ...item, userId });
+    });
+    
+    await batch.commit();
+  } catch (err) {
+    console.error('Failed to sync content indexes on Firebase:', err);
+  }
 };

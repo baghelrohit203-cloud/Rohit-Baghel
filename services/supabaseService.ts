@@ -1,5 +1,5 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
-import { ActivityEntry, Note, Goal, VaultEntry, PriceArticle } from '../types';
+import { ActivityEntry, Note, Goal, VaultEntry, PriceArticle, ContentIndexEntry } from '../types';
 
 let supabaseInstance: SupabaseClient | null = null;
 
@@ -889,6 +889,41 @@ export const supabaseDeletePriceArticle = async (articleId: string) => {
   const { error } = await client.from('price_articles').delete().eq('id', articleId);
   if (error) {
     console.error('Error deleting price article from Supabase price_articles table:', error);
+  }
+};
+
+export const supabaseSaveContentIndexes = async (userId: string, items: ContentIndexEntry[]) => {
+  const client = getSupabaseClient();
+  if (!client) return;
+  
+  try {
+    // Delete existing indexes to avoid orphans
+    await client.from('content_indexes').delete().eq('user_id', userId);
+    
+    if (items.length === 0) return;
+    
+    const records = items.map(item => ({
+      id: item.id,
+      user_id: userId,
+      content_type: item.contentType,
+      source_id: item.sourceId,
+      title: item.title,
+      category: item.category,
+      sequence_order: item.sequenceOrder,
+      unique_key: item.uniqueKey,
+      high_price: item.highPrice,
+      low_price: item.lowPrice,
+      currency: item.currency,
+      created_at: item.createdAt,
+      updated_at: item.updatedAt
+    }));
+    
+    const { error } = await client.from('content_indexes').upsert(records);
+    if (error) {
+      console.error('Error saving content indexes to Supabase:', error);
+    }
+  } catch (err) {
+    console.error('Failed to sync content indexes on Supabase:', err);
   }
 };
 

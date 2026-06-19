@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { ActivityEntry, ActivityGroup, ActivityStatus, AppState, ReportInterval, Note, NoteType, ProjectBlock, Goal, VaultEntry, PriceArticle, PriceRecord } from './types';
+import { ActivityEntry, ActivityGroup, ActivityStatus, AppState, ReportInterval, Note, NoteType, ProjectBlock, Goal, VaultEntry, PriceArticle, PriceRecord, ContentIndexEntry } from './types';
 import { ACTIVITY_GROUPS, GROUP_COLORS, NOTE_TYPES, NOTE_COLORS } from './constants';
 import { VaultWorkspace } from './components/VaultWorkspace';
 import { PriceWatchlist } from './components/PriceWatchlist';
@@ -33,7 +33,8 @@ import {
   cloudSaveVaultEntry, 
   cloudDeleteVaultEntry, 
   cloudSavePriceArticle, 
-  cloudDeletePriceArticle 
+  cloudDeletePriceArticle,
+  cloudSaveContentIndexes
 } from './services/firebaseService';
 
 import {
@@ -53,6 +54,7 @@ import {
   supabaseDeleteVaultEntry,
   supabaseSavePriceArticle,
   supabaseDeletePriceArticle,
+  supabaseSaveContentIndexes,
   supabaseUploadFile,
   supabaseDeleteFile
 } from './services/supabaseService';
@@ -113,6 +115,16 @@ const App: React.FC = () => {
   });
   const [currentView, setCurrentView] = useState<AppState['currentView']>('dashboard');
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
+  const [autoFocusItem, setAutoFocusItem] = useState<{ id: string; type: 'vault' | 'price_article'; category: string; title: string } | null>(null);
+
+  const handleNavigateToItem = (id: string, type: 'vault' | 'price_article', category: string, title: string) => {
+    setAutoFocusItem({ id, type, category, title });
+    if (type === 'vault') {
+      setCurrentView('vault');
+    } else if (type === 'price_article') {
+      setCurrentView('watchlist');
+    }
+  };
 
   const [showRefSaveSuccess, setShowRefSaveSuccess] = useState(false);
 
@@ -205,6 +217,47 @@ const App: React.FC = () => {
   });
 
   const [isMobileMoreOpen, setIsMobileMoreOpen] = useState<boolean>(false);
+
+  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+  const [isStandalone, setIsStandalone] = useState<boolean>(false);
+  const [isPwaModalOpen, setIsPwaModalOpen] = useState<boolean>(false);
+  const [pwaDeviceType, setPwaDeviceType] = useState<'android' | 'ios'>(() => {
+    if (typeof window !== 'undefined' && window.navigator) {
+      const ua = window.navigator.userAgent.toLowerCase();
+      if (/iphone|ipad|ipod/.test(ua)) return 'ios';
+    }
+    return 'android';
+  });
+
+  useEffect(() => {
+    const handleBeforeInstallPrompt = (e: Event) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+    };
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+
+    const checkStandalone = window.matchMedia('(display-mode: standalone)').matches || (navigator as any).standalone === true;
+    setIsStandalone(checkStandalone);
+
+    // Periodically re-check display-mode
+    const interval = setInterval(() => {
+      const isCurrentlyStandalone = window.matchMedia('(display-mode: standalone)').matches || (navigator as any).standalone === true;
+      setIsStandalone(isCurrentlyStandalone);
+    }, 3000);
+
+    return () => {
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+      clearInterval(interval);
+    };
+  }, []);
+
+  const triggerPwaInstall = async () => {
+    if (!deferredPrompt) return;
+    deferredPrompt.prompt();
+    const { outcome } = await deferredPrompt.userChoice;
+    console.log(`PWA installation outcome: ${outcome}`);
+    setDeferredPrompt(null);
+  };
 
   const audioContextRef = useRef<AudioContext | null>(null);
   const alarmIntervalRef = useRef<number | null>(null);
@@ -525,6 +578,93 @@ const App: React.FC = () => {
   useEffect(() => {
     localStorage.setItem('karma_chakra_v7_price_articles', JSON.stringify(priceArticles));
   }, [priceArticles]);
+
+  // Automatic calculation and synchronization of unique Content Index
+  const computedIndexes = useMemo(() => {
+    const sortedVault = [...vaultEntries].sort((a, b) => a.createdAt - b.createdAt);
+    const sortedPrice = [...priceArticles].sort((a, b) => a.createdAt - b.createdAt);
+    
+    const indexes: ContentIndexEntry[] = [];
+    const seenUniqueKeys = new Set<string>();
+    let orderCounter = 1;
+    
+    sortedVault.forEach((entry) => {
+      const titleClean = entry.title.trim();
+      if (!titleClean) return;
+      // Unique grouping key
+      const uniqueKey = `vault:${entry.category.toLowerCase()}:${titleClean.toLowerCase()}`;
+      seenUniqueKeys.add(uniqueKey);
+      
+      indexes.push({
+        id: `vault_${entry.id}`,
+        contentType: 'vault',
+        sourceId: entry.id,
+        title: titleClean,
+        category: entry.category,
+        sequenceOrder: orderCounter++,
+        uniqueKey,
+        createdAt: entry.createdAt,
+        updatedAt: entry.updatedAt
+      });
+    });
+    
+    sortedPrice.forEach((article) => {
+      const titleClean = article.name.trim();
+      if (!titleClean) return;
+      const uniqueKey = `price:${article.category.toLowerCase()}:${titleClean.toLowerCase()}`;
+      seenUniqueKeys.add(uniqueKey);
+      
+      let highPrice: number | undefined;
+      let lowPrice: number | undefined;
+      let currency: string | undefined;
+
+      if (article.records && article.records.length > 0) {
+        const prices = article.records.map(r => r.price).filter(p => typeof p === 'number' && !isNaN(p));
+        if (prices.length > 0) {
+          highPrice = Math.max(...prices);
+          lowPrice = Math.min(...prices);
+        }
+        const firstWithCurrency = article.records.find(r => r.currency);
+        if (firstWithCurrency) {
+          currency = firstWithCurrency.currency;
+        }
+      }
+      
+      indexes.push({
+        id: `price_${article.id}`,
+        contentType: 'price_article',
+        sourceId: article.id,
+        title: titleClean,
+        category: article.category,
+        sequenceOrder: orderCounter++,
+        uniqueKey,
+        highPrice,
+        lowPrice,
+        currency,
+        createdAt: article.createdAt,
+        updatedAt: article.updatedAt
+      });
+    });
+    
+    return { indexes, uniqueCount: seenUniqueKeys.size };
+  }, [vaultEntries, priceArticles]);
+
+  const contentIndexes = computedIndexes.indexes;
+  const uniqueIndexesCount = computedIndexes.uniqueCount;
+
+  useEffect(() => {
+    if (!currentUser) return;
+    
+    const syncIndex = async () => {
+      if (syncProvider === 'supabase') {
+        await supabaseSaveContentIndexes(currentUser.uid, contentIndexes);
+      } else {
+        await cloudSaveContentIndexes(currentUser.uid, contentIndexes);
+      }
+    };
+    
+    syncIndex();
+  }, [contentIndexes, currentUser, syncProvider]);
 
   // Alarm checking logic
   useEffect(() => {
@@ -1366,6 +1506,24 @@ const App: React.FC = () => {
               </div>
               <span className={`inline-block w-2.4 h-2.4 rounded-full ${currentUser ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.6)] animate-pulse' : 'bg-amber-400 shadow-[0_0_4px_rgba(245,158,11,0.5)]'}`} title={currentUser ? 'Connected & Synced' : 'Ready (Offline Mode)'} />
             </button>
+
+            <button 
+              onClick={() => { setIsPwaModalOpen(true); if (window.innerWidth < 1024) setIsSidebarOpen(false); }} 
+              className={`flex items-center justify-between py-3.5 px-4 rounded-2xl font-black text-xs uppercase tracking-wider transition-all w-full text-left text-stone-500 hover:text-[#c25e2d] dark:text-stone-400 dark:hover:text-[#c25e2d] hover:bg-stone-100/60 dark:hover:bg-stone-900/60 mt-2 border border-dashed ${isStandalone ? 'border-emerald-500/30' : 'border-[#c25e2d]/30'}`}
+            >
+              <div className="flex items-center gap-4">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                  <rect x="5" y="2" width="14" height="20" rx="2" ry="2" />
+                  <line x1="12" y1="18" x2="12.01" y2="18" />
+                </svg>
+                <span>{isStandalone ? 'App Standalone Mode' : 'Install Native App'}</span>
+              </div>
+              {isStandalone ? (
+                <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.7)] animate-pulse" title="Running in Standalone App mode" />
+              ) : (
+                <span className="w-2.5 h-2.5 rounded-full bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.7)] animate-pulse" title="Available to Install Standalone" />
+              )}
+            </button>
           </nav>
         </div>
 
@@ -2011,6 +2169,11 @@ const App: React.FC = () => {
             onAddEntry={handleAddVaultEntry}
             onUpdateEntry={handleUpdateVaultEntry}
             onDeleteEntry={handleDeleteVaultEntry}
+            contentIndexes={contentIndexes}
+            uniqueIndexesCount={uniqueIndexesCount}
+            autoFocusItem={autoFocusItem}
+            onNavigateToItem={handleNavigateToItem}
+            clearAutoFocus={() => setAutoFocusItem(null)}
           />
         )}
 
@@ -2023,6 +2186,11 @@ const App: React.FC = () => {
             onDeletePriceRecord={handleDeletePriceRecord}
             onDeleteArticle={handleDeletePriceArticle}
             onUpdateArticle={handleUpdatePriceArticle}
+            contentIndexes={contentIndexes}
+            uniqueIndexesCount={uniqueIndexesCount}
+            autoFocusItem={autoFocusItem}
+            onNavigateToItem={handleNavigateToItem}
+            clearAutoFocus={() => setAutoFocusItem(null)}
           />
         )}
 
@@ -2344,6 +2512,22 @@ create table if not exists public.price_articles (
   updated_at bigint
 );
 
+create table if not exists public.content_indexes (
+  id text primary key,
+  user_id uuid not null,
+  content_type text not null,
+  source_id text not null,
+  title text not null,
+  category text not null,
+  sequence_order integer,
+  unique_key text,
+  high_price numeric,
+  low_price numeric,
+  currency text,
+  updated_at bigint,
+  created_at bigint
+);
+
 -- Upgrade existing tables with missing columns (run if you already created tables earlier)
 alter table public.activities add column if not exists project text;
 alter table public.activities add column if not exists start_time text;
@@ -2363,6 +2547,10 @@ alter table public.vault_entries add column if not exists project_tag text;
 alter table public.vault_entries add column if not exists impact_rating integer;
 alter table public.vault_entries add column if not exists status text;
 
+alter table public.content_indexes add column if not exists high_price numeric;
+alter table public.content_indexes add column if not exists low_price numeric;
+alter table public.content_indexes add column if not exists currency text;
+
 -- 2. Enable Row Level Security (RLS) for all tables
 alter table public.activities enable row level security;
 alter table public.notes enable row level security;
@@ -2370,6 +2558,7 @@ alter table public.goals enable row level security;
 alter table public.reflections enable row level security;
 alter table public.vault_entries enable row level security;
 alter table public.price_articles enable row level security;
+alter table public.content_indexes enable row level security;
 
 -- 3. Create native, secure policies using auth.uid()
 drop policy if exists "activities_session_owner" on public.activities;
@@ -2394,6 +2583,10 @@ create policy "vault_entries_session_owner" on public.vault_entries
 
 drop policy if exists "price_articles_session_owner" on public.price_articles;
 create policy "price_articles_session_owner" on public.price_articles
+  for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+
+drop policy if exists "content_indexes_session_owner" on public.content_indexes;
+create policy "content_indexes_session_owner" on public.content_indexes
   for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
 
 -- 4. Create Real-Time Publication safely
@@ -2444,6 +2637,13 @@ end $$;
 
 do $$ begin
   alter publication supabase_realtime add table public.price_articles;
+exception
+  when duplicate_object then null;
+  when undefined_table then null;
+end $$;
+
+do $$ begin
+  alter publication supabase_realtime add table public.content_indexes;
 exception
   when duplicate_object then null;
   when undefined_table then null;
@@ -2562,6 +2762,158 @@ end $$;`}
           onSave={handleSaveNote}
           onDelete={handleDeleteNote}
         />
+      )}
+
+      {isPwaModalOpen && (
+        <div className="fixed inset-0 z-[150] flex items-center justify-center p-4 bg-black/60 backdrop-blur-md animate-in fade-in duration-200">
+          <div className="glass bg-white dark:bg-[#0c0c0c] border border-stone-200/50 dark:border-stone-850 p-6 sm:p-8 rounded-3xl max-w-xl w-full max-h-[90vh] overflow-y-auto shadow-2xl relative space-y-6">
+            
+            {/* Close Button */}
+            <button 
+              onClick={() => setIsPwaModalOpen(false)}
+              className="absolute top-5 right-5 p-2 rounded-full hover:bg-stone-100 dark:hover:bg-stone-900 transition-colors text-stone-400 hover:text-stone-700 dark:hover:text-stone-300"
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+              </svg>
+            </button>
+
+            {/* Header */}
+            <div className="text-center space-y-1">
+              <span className="text-[10px] uppercase font-black tracking-[0.2em] text-[#c25e2d]">Karma Standalone Toolkit</span>
+              <h3 className="text-2xl font-black text-[#2b2925] dark:text-stone-100 tracking-tight flex items-center justify-center gap-2">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="text-[#c25e2d]"><rect width="14" height="20" x="5" y="2" rx="2" ry="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>
+                Install Native Application
+              </h3>
+            </div>
+
+            {/* Live Standalone Mode Checking */}
+            <div className={`p-4 rounded-2xl border ${isStandalone ? 'bg-emerald-50/50 dark:bg-emerald-950/25 border-emerald-500/25' : 'bg-amber-50/50 dark:bg-amber-950/25 border-amber-500/25'}`}>
+              <div className="flex items-start gap-3">
+                <span className="text-base">
+                  {isStandalone ? '🟢' : '🟡'}
+                </span>
+                <div className="space-y-1">
+                  <h4 className="text-xs font-black uppercase text-stone-600 dark:text-stone-300 tracking-wider">
+                    {isStandalone ? 'Standalone App Active' : 'Running in Web Browser'}
+                  </h4>
+                  <p className="text-xs text-stone-500 dark:text-stone-400 font-medium leading-relaxed">
+                    {isStandalone 
+                      ? 'Perfect! The system is running in Standalone Mode. All web address bars and browser controls are completely hidden, behaving like a native compiled package.' 
+                      : 'The system is running as a website inside a browser tab. To enjoy an immersive fullscreen experience where it functions like a custom installed application, add it directly to your device.'}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Benefits Banner */}
+            <div className="grid grid-cols-3 gap-3">
+              <div className="bg-stone-50 dark:bg-stone-900/50 p-3 rounded-2xl border border-stone-200/40 text-center space-y-1">
+                <span className="text-lg">📱</span>
+                <div className="text-[10px] font-black uppercase tracking-wider text-stone-500">Standalone</div>
+                <div className="text-[9px] text-stone-400 font-medium">No Address Bar</div>
+              </div>
+              <div className="bg-stone-50 dark:bg-stone-900/50 p-3 rounded-2xl border border-stone-200/40 text-center space-y-1">
+                <span className="text-lg">⚡</span>
+                <div className="text-[10px] font-black uppercase tracking-wider text-stone-500">Instant</div>
+                <div className="text-[9px] text-stone-400 font-medium">Hardware Cached</div>
+              </div>
+              <div className="bg-stone-50 dark:bg-stone-900/50 p-3 rounded-2xl border border-stone-200/40 text-center space-y-1">
+                <span className="text-lg">💾</span>
+                <div className="text-[10px] font-black uppercase tracking-wider text-stone-500">Offline</div>
+                <div className="text-[9px] text-stone-400 font-medium">Service Worker</div>
+              </div>
+            </div>
+
+            {/* Direct Installer Click Action (if supported by browser/device) */}
+            {deferredPrompt && (
+              <button 
+                onClick={triggerPwaInstall}
+                className="w-full py-4 bg-[#c25e2d] hover:bg-[#b05023] text-white rounded-2xl font-black text-xs uppercase tracking-widest transition-all shadow-md shadow-[#c25e2d]/20 flex items-center justify-center gap-2"
+              >
+                📥 CLICK TO INSTALL STANDALONE NOW
+              </button>
+            )}
+
+            {/* OS Tabs */}
+            <div className="space-y-4">
+              <div className="flex border-b border-stone-200/40 dark:border-stone-850 pb-px">
+                <button 
+                  onClick={() => setPwaDeviceType('android')}
+                  className={`flex-1 pb-3 text-xs uppercase font-black tracking-wider transition-colors border-b-2 ${pwaDeviceType === 'android' ? 'border-[#c25e2d] text-[#c25e2d]' : 'border-transparent text-stone-400'}`}
+                >
+                  🤖 Android (Chrome/Firefox)
+                </button>
+                <button 
+                  onClick={() => setPwaDeviceType('ios')}
+                  className={`flex-1 pb-3 text-xs uppercase font-black tracking-wider transition-colors border-b-2 ${pwaDeviceType === 'ios' ? 'border-[#c25e2d] text-[#c25e2d]' : 'border-transparent text-stone-400'}`}
+                >
+                  🍎 iPhone / iPad (Safari)
+                </button>
+              </div>
+
+              {/* Instructions Panel */}
+              <div className="bg-stone-50/50 dark:bg-stone-900/30 p-5 rounded-2xl border border-stone-200/50 dark:border-stone-850 space-y-4 text-xs">
+                {pwaDeviceType === 'android' ? (
+                  <div className="space-y-3 font-medium text-stone-600 dark:text-stone-300">
+                    <div className="flex gap-3">
+                      <span className="w-5 h-5 flex items-center justify-center bg-[#c25e2d]/10 text-[#c25e2d] rounded-full font-black text-[10px]">1</span>
+                      <p className="flex-1">Open <strong>Google Chrome</strong> on your Android/mobile device.</p>
+                    </div>
+                    <div className="flex gap-3">
+                      <span className="w-5 h-5 flex items-center justify-center bg-[#c25e2d]/10 text-[#c25e2d] rounded-full font-black text-[10px]">2</span>
+                      <p className="flex-1">Tap the <strong>Menu icon</strong> (the three vertical dots <span className="font-bold">⋮</span> at the top-right corner).</p>
+                    </div>
+                    <div className="flex gap-3">
+                      <span className="w-5 h-5 flex items-center justify-center bg-[#c25e2d]/10 text-[#c25e2d] rounded-full font-black text-[10px]">3</span>
+                      <p className="flex-1">Select <strong>"Install app"</strong> or <strong>"Add to Home Screen"</strong>.</p>
+                    </div>
+                    <div className="flex gap-3">
+                      <span className="w-5 h-5 flex items-center justify-center bg-[#c25e2d]/10 text-[#c25e2d] rounded-full font-black text-[10px]">4</span>
+                      <p className="flex-1">Confirm by tapping <strong className="text-[#c25e2d]">Install</strong> or <strong className="text-[#c25e2d]">Add</strong>. The app icon will appear instantly on your device home-screen!</p>
+                    </div>
+                    <div className="pt-2 border-t border-stone-200/40 dark:border-stone-800 text-[11px] text-stone-400 dark:text-stone-500 italic">
+                      💡 Tip: Once added, launch "Karma Chakra 6x4" from your home launcher. It will load instantly inside a standalone process without address bars, giving you a native application feel!
+                    </div>
+                  </div>
+                ) : (
+                  <div className="space-y-3 font-medium text-stone-600 dark:text-stone-300">
+                    <div className="flex gap-3">
+                      <span className="w-5 h-5 flex items-center justify-center bg-[#c25e2d]/10 text-[#c25e2d] rounded-full font-black text-[10px]">1</span>
+                      <p className="flex-1">Open this utility link in your <strong>Apple Safari</strong> browser.</p>
+                    </div>
+                    <div className="flex gap-3">
+                      <span className="w-5 h-5 flex items-center justify-center bg-[#c25e2d]/10 text-[#c25e2d] rounded-full font-black text-[10px]">2</span>
+                      <p className="flex-1">Tap the Safari <strong>Share button</strong> (the box with an upward-pointing arrow at the bottom/top bar).</p>
+                    </div>
+                    <div className="flex gap-3">
+                      <span className="w-5 h-5 flex items-center justify-center bg-[#c25e2d]/10 text-[#c25e2d] rounded-full font-black text-[10px]">3</span>
+                      <p className="flex-1">Scroll down and select <strong>"Add to Home Screen"</strong>.</p>
+                    </div>
+                    <div className="flex gap-3">
+                      <span className="w-5 h-5 flex items-center justify-center bg-[#c25e2d]/10 text-[#c25e2d] rounded-full font-black text-[10px]">4</span>
+                      <p className="flex-1">Tap <strong>Add</strong> in the top-right corner. It is now installed as an app on your system home screen!</p>
+                    </div>
+                    <div className="pt-2 border-t border-stone-200/40 dark:border-stone-800 text-[11px] text-stone-400 dark:text-stone-500 italic">
+                      ⚠️ Note: iOS requires using default Apple Safari. Other browsers on iOS (like Chrome or Firefox iOS) do not support the home screen compilation option.
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Footer Close */}
+            <div className="pt-2">
+              <button 
+                onClick={() => setIsPwaModalOpen(false)}
+                className="w-full py-4 border border-stone-200 dark:border-stone-800 text-stone-500 dark:text-stone-400 hover:bg-stone-50 dark:hover:bg-stone-900 font-bold uppercase tracking-widest text-[10px] rounded-2xl transition-all"
+              >
+                Close Status Panel
+              </button>
+            </div>
+
+          </div>
+        </div>
       )}
     </div>
   );

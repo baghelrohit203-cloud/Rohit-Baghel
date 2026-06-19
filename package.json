@@ -7,9 +7,15 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "lint": "tsc --noEmit",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "cap:add": "cap add android",
+    "cap:sync": "npm run build && cap sync",
+    "cap:open": "cap open android"
   },
   "dependencies": {
+    "@capacitor/android": "^8.4.0",
+    "@capacitor/cli": "^8.4.0",
+    "@capacitor/core": "^8.4.0",
     "@google/genai": "^1.35.0",
     "@supabase/supabase-js": "^2.108.2",
     "firebase": "^12.15.0",

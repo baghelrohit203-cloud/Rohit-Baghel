@@ -1,11 +1,16 @@
 import React, { useState } from 'react';
-import { VaultEntry, VaultCategory, VaultListItem } from '../types';
+import { VaultEntry, VaultCategory, VaultListItem, ContentIndexEntry } from '../types';
 
 interface VaultWorkspaceProps {
   entries: VaultEntry[];
   onAddEntry: (entry: Omit<VaultEntry, 'id' | 'createdAt' | 'updatedAt'>) => void;
   onUpdateEntry: (entry: VaultEntry) => void;
   onDeleteEntry: (id: string) => void;
+  contentIndexes: ContentIndexEntry[];
+  uniqueIndexesCount: number;
+  autoFocusItem?: { id: string; type: 'vault' | 'price_article'; category: string; title: string } | null;
+  onNavigateToItem?: (id: string, type: 'vault' | 'price_article', category: string, title: string) => void;
+  clearAutoFocus?: () => void;
 }
 
 const CATEGORIES: { value: VaultCategory; label: string; icon: React.ReactNode; desc: string; color: string }[] = [
@@ -92,11 +97,18 @@ export const VaultWorkspace: React.FC<VaultWorkspaceProps> = ({
   entries,
   onAddEntry,
   onUpdateEntry,
-  onDeleteEntry
+  onDeleteEntry,
+  contentIndexes,
+  uniqueIndexesCount,
+  autoFocusItem,
+  onNavigateToItem,
+  clearAutoFocus
 }) => {
   const [activeTab, setActiveTab] = useState<VaultCategory>('Journal');
   const [searchQuery, setSearchQuery] = useState('');
   const [isOpenCreator, setIsOpenCreator] = useState(false);
+  const [showIndexCatalog, setShowIndexCatalog] = useState(false);
+  const [indexSearchQuery, setIndexSearchQuery] = useState('');
 
   // Form states for creating new entry
   const [title, setTitle] = useState('');
@@ -236,6 +248,39 @@ export const VaultWorkspace: React.FC<VaultWorkspaceProps> = ({
     setIsOpenCreator(true);
   };
 
+  React.useEffect(() => {
+    if (autoFocusItem && autoFocusItem.type === 'vault') {
+      const found = entries.find(e => e.id === autoFocusItem.id);
+      if (found) {
+        startEdit(found);
+        setTimeout(() => {
+          document.getElementById('vault-creator-form')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }, 150);
+        if (clearAutoFocus) {
+          clearAutoFocus();
+        }
+      }
+    }
+  }, [autoFocusItem, entries]);
+
+  const handleIndexItemClick = (idx: ContentIndexEntry) => {
+    if (idx.contentType === 'vault') {
+      const found = entries.find(e => e.id === idx.sourceId);
+      if (found) {
+        startEdit(found);
+        setTimeout(() => {
+          document.getElementById('vault-creator-form')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }, 100);
+      } else if (onNavigateToItem) {
+        onNavigateToItem(idx.sourceId, idx.contentType, idx.category, idx.title);
+      }
+    } else {
+      if (onNavigateToItem) {
+        onNavigateToItem(idx.sourceId, idx.contentType, idx.category, idx.title);
+      }
+    }
+  };
+
   const toggleChecklistItem = (entryId: string, itemId: string) => {
     const entry = entries.find(x => x.id === entryId);
     if (!entry || !entry.listItems) return;
@@ -321,6 +366,160 @@ export const VaultWorkspace: React.FC<VaultWorkspaceProps> = ({
         </div>
       </div>
 
+      {/* Retractable Dharma Content Index Catalog */}
+      <div className="glass p-5 rounded-3xl border border-stone-200/50 bg-gradient-to-br from-white/95 to-stone-50/50 dark:from-stone-900/90 dark:to-stone-950/50 shadow-sm transition-all duration-300">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 bg-[#7a523a]/10 text-[#7a523a] rounded-2xl dark:bg-[#7a523a]/20 dark:text-[#f3dfc1]">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1-2.5-2.5Z" />
+                <path d="M6 6h15" />
+                <path d="M6 10h15" />
+                <path d="M6 14h15" />
+              </svg>
+            </div>
+            <div>
+              <h3 className="text-xs font-black text-stone-850 dark:text-stone-100 uppercase tracking-wider font-mono">Dharma Vault & Prices Index Catalog</h3>
+              <p className="text-[10px] text-stone-500 uppercase tracking-widest mt-0.5">
+                Real-time synchronized metadata & unique item directory
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="px-2.5 py-1 bg-[#2d6a4f]/10 text-[#2d6a4f] rounded-full text-[9px] font-black uppercase tracking-wider">
+              {uniqueIndexesCount} Unique Items
+            </span>
+            <span className="px-2.5 py-1 bg-stone-100 dark:bg-stone-850 text-stone-600 dark:text-stone-400 rounded-full text-[9px] font-black uppercase tracking-wider">
+              {contentIndexes.length} Total Rows
+            </span>
+            <button
+              onClick={() => setShowIndexCatalog(!showIndexCatalog)}
+              className="px-3 py-1.5 bg-stone-200 hover:bg-stone-300 dark:bg-stone-800 dark:hover:bg-stone-700 text-stone-700 dark:text-stone-300 text-[9px] font-black uppercase tracking-wider rounded-xl transition-all"
+            >
+              {showIndexCatalog ? 'Hide Catalog' : 'Show Catalog'}
+            </button>
+          </div>
+        </div>
+
+        {showIndexCatalog && (
+          <div className="mt-5 pt-4 border-t border-stone-200/50 dark:border-stone-800 space-y-4 animate-in fade-in duration-300">
+            {/* Index Search Bar */}
+            <div className="relative">
+              <input
+                type="text"
+                placeholder="Search index catalog by title, item name or category..."
+                value={indexSearchQuery}
+                onChange={(e) => setIndexSearchQuery(e.target.value)}
+                className="w-full pl-9 pr-4 py-2 bg-white/70 dark:bg-stone-950 border border-stone-200 dark:border-stone-850 rounded-xl text-xs font-semibold focus:outline-none focus:border-[#7a523a]/60 dark:placeholder-stone-700 transition-all text-stone-800 dark:text-stone-100"
+              />
+              <svg className="absolute left-3 top-2.5 text-stone-405" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg>
+            </div>
+
+            {/* Catalog Table */}
+            <div className="overflow-x-auto rounded-xl border border-stone-200/40 dark:border-stone-800/80">
+              <table className="w-full text-left text-xs border-collapse">
+                <thead>
+                  <tr className="bg-stone-100/55 dark:bg-stone-900/60 text-stone-600 dark:text-stone-400 border-b border-stone-200/50 dark:border-stone-800/50 font-black uppercase tracking-wider text-[10px]">
+                    <th className="py-2 px-3 font-mono">Order</th>
+                    <th className="py-2 px-3">Content / Item Name</th>
+                    <th className="py-2 px-3">Category</th>
+                    <th className="py-2 px-3">Type</th>
+                    <th className="py-2 px-3 text-right">
+                      <span className="inline-flex items-center gap-1 text-emerald-650 dark:text-emerald-450">
+                        <span>↓</span> Low Price
+                      </span>
+                    </th>
+                    <th className="py-2 px-3 text-right">
+                      <span className="inline-flex items-center gap-1 text-rose-650 dark:text-rose-455">
+                        <span>↑</span> High Price
+                      </span>
+                    </th>
+                    <th className="py-2 px-3 text-right">Last Synchronized</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-stone-100 dark:divide-stone-900 font-medium text-stone-700 dark:text-stone-300">
+                  {contentIndexes
+                    .filter(idx => {
+                      if (!indexSearchQuery.trim()) return true;
+                      const q_low = indexSearchQuery.toLowerCase();
+                      return idx.title.toLowerCase().includes(q_low) || 
+                             idx.category.toLowerCase().includes(q_low) ||
+                             idx.contentType.toLowerCase().includes(q_low);
+                    })
+                    .map((idx) => {
+                      const isVaultType = idx.contentType === 'vault';
+                      return (
+                        <tr 
+                          key={idx.id} 
+                          onClick={() => handleIndexItemClick(idx)}
+                          className="cursor-pointer hover:bg-stone-100/80 dark:hover:bg-stone-900/50 transition-all"
+                          title="Click to locate or open detailed record/watchlist"
+                        >
+                          <td className="py-2 px-3 font-mono text-[11px] text-stone-400 dark:text-stone-500">
+                            #{idx.sequenceOrder}
+                          </td>
+                          <td className="py-2 px-3 font-extrabold text-stone-900 dark:text-stone-100 flex items-center gap-2">
+                            {isVaultType ? (
+                              <span className="w-1.5 h-1.5 rounded-full bg-[#7a523a]" title="Vault Info" />
+                            ) : (
+                              <span className="w-1.5 h-1.5 rounded-full bg-[#2d6a4f]" title="Price Watch" />
+                            )}
+                            {idx.title}
+                          </td>
+                          <td className="py-2 px-3">
+                            <span className={`px-2 py-0.5 rounded-lg text-[9px] font-bold uppercase tracking-wider ${
+                              isVaultType 
+                                ? 'bg-[#7a523a]/5 text-[#7a523a] dark:bg-[#7a523a]/25 dark:text-[#f3dfc1]' 
+                                : 'bg-[#2d6a4f]/5 text-[#2d6a4f] dark:bg-[#2d6a4f]/25 dark:text-[#b7e4c7]'
+                            }`}>
+                              {idx.category}
+                            </span>
+                          </td>
+                          <td className="py-2 px-3 font-mono text-[9px] uppercase tracking-wider text-stone-550 dark:text-stone-400">
+                            {isVaultType ? 'Dharma Vault' : 'Price Watchlist'}
+                          </td>
+                          <td className="py-2 px-3 text-right font-mono text-[11px] font-bold text-emerald-600 dark:text-emerald-400">
+                            {!isVaultType && idx.lowPrice !== undefined ? (
+                              <span>
+                                {idx.currency || ''} {idx.lowPrice.toLocaleString()}
+                              </span>
+                            ) : (
+                              <span className="text-stone-300 dark:text-stone-850">-</span>
+                            )}
+                          </td>
+                          <td className="py-2 px-3 text-right font-mono text-[11px] font-bold text-rose-600 dark:text-rose-400">
+                            {!isVaultType && idx.highPrice !== undefined ? (
+                              <span>
+                                {idx.currency || ''} {idx.highPrice.toLocaleString()}
+                              </span>
+                            ) : (
+                              <span className="text-stone-300 dark:text-stone-850">-</span>
+                            )}
+                          </td>
+                          <td className="py-2 px-3 text-right text-stone-400 dark:text-stone-600 font-mono text-[10px]">
+                            {new Date(idx.updatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  {contentIndexes.length === 0 && (
+                    <tr>
+                      <td colSpan={7} className="py-8 text-center text-stone-400 dark:text-stone-650 font-bold uppercase tracking-wider text-[10px]">
+                        No indexed items recorded. Add information or articles.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+            <div className="text-[9px] text-[#2d6a4f] dark:text-[#b7e4c7] font-bold uppercase tracking-wider flex items-center gap-1.5 font-mono">
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" /><polyline points="22 4 12 14.01 9 11.01" /></svg>
+              <span>Automatic and immediate cloud synchronization is active across all indexed rows</span>
+            </div>
+          </div>
+        )}
+      </div>
+
       {/* Tab Selectors Grid */}
       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2">
         {CATEGORIES.map(category => {
@@ -371,7 +570,7 @@ export const VaultWorkspace: React.FC<VaultWorkspaceProps> = ({
 
       {/* Creator Form Section (Collapsible) */}
       {isOpenCreator && (
-        <form onSubmit={handleSave} className="glass p-6 rounded-3xl border border-stone-200/60 bg-white/95 space-y-5 animate-in slide-in-from-top-4 duration-300">
+        <form id="vault-creator-form" onSubmit={handleSave} className="glass p-6 rounded-3xl border border-stone-200/60 bg-white/95 space-y-5 animate-in slide-in-from-top-4 duration-300">
           <div className="flex items-center justify-between border-b border-stone-200/40 pb-3">
             <h3 className="text-xs font-black text-stone-500 uppercase tracking-widest flex items-center gap-1.5 dark:text-stone-300">
               <span>{activeCategoryConfig?.icon}</span>

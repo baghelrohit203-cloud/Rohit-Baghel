@@ -120,6 +120,21 @@ export interface PriceArticle {
   updatedAt: number;
 }
 
+export interface ContentIndexEntry {
+  id: string;
+  contentType: 'vault' | 'price_article';
+  sourceId: string;
+  title: string;
+  category: string;
+  sequenceOrder: number;
+  uniqueKey: string;
+  highPrice?: number;
+  lowPrice?: number;
+  currency?: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
 export interface AppState {
   activities: ActivityEntry[];
   notes: Note[];
