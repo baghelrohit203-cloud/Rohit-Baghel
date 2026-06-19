@@ -139,7 +139,7 @@ export interface AppState {
   activities: ActivityEntry[];
   notes: Note[];
   goals: Goal[];
-  currentView: 'dashboard' | 'stats' | 'goals' | 'log' | 'focus' | 'vault' | 'watchlist' | 'sync';
+  currentView: 'dashboard' | 'stats' | 'goals' | 'log' | 'focus' | 'vault' | 'watchlist' | 'sync' | 'summary';
   selectedDate: string;
   reportInterval: ReportInterval;
 }

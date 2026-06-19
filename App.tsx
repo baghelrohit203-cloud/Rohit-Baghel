@@ -127,6 +127,7 @@ const App: React.FC = () => {
   };
 
   const [showRefSaveSuccess, setShowRefSaveSuccess] = useState(false);
+  const [summaryFilter, setSummaryFilter] = useState<'all' | 'completion' | 'karma' | 'focus' | 'slipup' | 'vault' | 'price'>('all');
 
   const parseReflections = (raw: string): Record<string, { text: string; hasMistake?: boolean; mistakeDescription?: string; timeLostMinutes?: number }> => {
     try {
@@ -283,6 +284,126 @@ const App: React.FC = () => {
     const timer = setInterval(() => setCurrentTime(new Date()), 1000);
     return () => clearInterval(timer);
   }, []);
+
+  // 3-day automatic cleanup after state is initially hydrated
+  useEffect(() => {
+    const runCleanup = () => {
+      const now = new Date();
+      // Calculate local date strings for exactly the last 3 days
+      const d1 = now.toISOString().split('T')[0];
+      const d2 = new Date(now.getTime() - 1 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+      const d3 = new Date(now.getTime() - 2 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+      
+      const thresholdDate = d3; // Retain only dates >= d3
+      const thresholdTimestamp = now.getTime() - 3 * 24 * 60 * 60 * 1000;
+
+      // 1. Clean activities (daily logs)
+      let activitiesToPrune: string[] = [];
+      setActivities(prev => {
+        let hasChanges = false;
+        const cleaned = prev.filter(act => {
+          const isExpired = act.date ? (act.date < thresholdDate) : (act.timestamp < thresholdTimestamp);
+          if (isExpired) {
+            activitiesToPrune.push(act.id);
+            hasChanges = true;
+            return false;
+          }
+          return true;
+        });
+
+        if (hasChanges) {
+          console.log(`Auto-cleanup pruned ${activitiesToPrune.length} expired activities.`);
+          return cleaned;
+        }
+        return prev;
+      });
+
+      // Synchronize deletion of pruned activities to cloud database
+      if (activitiesToPrune.length > 0) {
+        activitiesToPrune.forEach(aid => {
+          if (currentUser) {
+            if (syncProvider === 'supabase') {
+              try { supabaseDeleteActivity(aid); } catch (e) { console.error(e); }
+            } else {
+              try { cloudDeleteActivity(aid); } catch (e) { console.error(e); }
+            }
+          }
+        });
+      }
+
+      // 2. Clean single date logs: Journal & Reflection Notes
+      let notesToPrune: string[] = [];
+      setNotes(prev => {
+        let hasChanges = false;
+        const cleaned = prev.filter(note => {
+          if (note.type === 'Journal' || note.type === 'Reflection') {
+            const noteDay = new Date(note.createdAt).toISOString().split('T')[0];
+            if (noteDay < thresholdDate || note.createdAt < thresholdTimestamp) {
+              notesToPrune.push(note.id);
+              hasChanges = true;
+              return false;
+            }
+          }
+          return true;
+        });
+        if (hasChanges) {
+          console.log(`Auto-cleanup pruned ${notesToPrune.length} expired notes.`);
+          return cleaned;
+        }
+        return prev;
+      });
+
+      // Synchronize deletion of pruned notes to cloud database
+      if (notesToPrune.length > 0) {
+        notesToPrune.forEach(nid => {
+          if (currentUser) {
+            if (syncProvider === 'supabase') {
+              try { supabaseDeleteNote(nid); } catch (e) { console.error(e); }
+            } else {
+              try { cloudDeleteNote(nid); } catch (e) { console.error(e); }
+            }
+          }
+        });
+      }
+
+      // 3. Clean single date logs: reflections (reflectionsMap dates)
+      setReflection(prev => {
+        try {
+          if (!prev || !prev.trim()) return prev;
+          const map = JSON.parse(prev);
+          if (map && typeof map === 'object' && !Array.isArray(map)) {
+            let hasChanges = false;
+            const cleanedMap: Record<string, any> = {};
+            for (const key of Object.keys(map)) {
+              if (key >= thresholdDate) {
+                cleanedMap[key] = map[key];
+              } else {
+                hasChanges = true;
+              }
+            }
+            if (hasChanges) {
+              console.log("Auto-cleanup pruned expired day reflections.");
+              return JSON.stringify(cleanedMap);
+            }
+          }
+        } catch (e) {
+          // Ignores
+        }
+        return prev;
+      });
+    };
+
+    // Run cleanup delayed by 3 seconds to allow initial state hydration to finish
+    const initialTimer = setTimeout(runCleanup, 3000);
+
+    // Run cleanup periodically every hour
+    const periodicTimer = setInterval(runCleanup, 60 * 60 * 1000);
+
+    return () => {
+      clearTimeout(initialTimer);
+      clearInterval(periodicTimer);
+    };
+  }, [currentUser, syncProvider]);
 
   // Listen for Supabase user auth changes and handle real-time sync subscription
   useEffect(() => {
@@ -1352,6 +1473,273 @@ const App: React.FC = () => {
     return stats;
   }, [dashboardActivities]);
 
+  // Dynamic 3-day window statistics and chronological dataset
+  const last3DaysData = useMemo(() => {
+    const dates = [];
+    const now = new Date();
+    for (let i = 0; i < 3; i++) {
+      const d = new Date(now.getTime() - i * 24 * 60 * 60 * 1000);
+      dates.push(d.toISOString().split('T')[0]);
+    }
+    // Sort ascending (starting from Day 3 to today)
+    dates.reverse();
+
+    return dates.map(dateStr => {
+      const dayActivities = activities.filter(a => a.date === dateStr);
+      const completed = dayActivities.filter(a => a.status === 'Completed').length;
+      const pending = dayActivities.filter(a => a.status === 'Pending').length;
+      const total = dayActivities.length;
+      
+      const ref = reflectionsMap[dateStr];
+      const hasMistake = ref?.hasMistake || false;
+      const timeLost = ref?.timeLostMinutes || 0;
+      
+      // label formatting
+      const dateObj = new Date(dateStr);
+      const label = dateObj.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+
+      return {
+        date: dateStr,
+        label,
+        completed,
+        pending,
+        total,
+        timeLost,
+        hasMistake,
+        reflectionText: ref?.text || '',
+        mistakeDescription: ref?.mistakeDescription || ''
+      };
+    });
+  }, [activities, reflectionsMap]);
+
+  const summaryStats = useMemo(() => {
+    let totalTasks = 0;
+    let completedTasks = 0;
+    let totalMinutesLost = 0;
+    let totalMinutesTracked = 0;
+    let daysWithMistakes = 0;
+
+    last3DaysData.forEach(day => {
+      totalTasks += day.total;
+      completedTasks += day.completed;
+      totalMinutesLost += day.timeLost;
+      if (day.hasMistake) daysWithMistakes++;
+    });
+
+    activities.forEach(a => {
+      if (a.status === 'Completed') {
+        totalMinutesTracked += Math.round((a.timer?.totalElapsed || 0) / 60000);
+      }
+    });
+
+    const completionRate = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 100;
+
+    // Vault and Price aggregations
+    const totalVaultItems = vaultEntries.length;
+    const totalPriceArticles = priceArticles.length;
+    const totalPriceRecords = priceArticles.reduce((sum, art) => sum + (art.records?.length || 0), 0);
+
+    return {
+      totalTasks,
+      completedTasks,
+      completionRate,
+      totalMinutesLost,
+      totalMinutesTracked,
+      daysWithMistakes,
+      totalVaultItems,
+      totalPriceArticles,
+      totalPriceRecords
+    };
+  }, [last3DaysData, activities, vaultEntries, priceArticles]);
+
+  const last3DaysPostings = useMemo(() => {
+    const now = new Date();
+    const thresholdMillis = now.getTime() - 3 * 24 * 60 * 60 * 1000;
+    const list: Array<{
+      id: string;
+      source: 'vault' | 'price' | 'activity' | 'slipup';
+      type: 'creation' | 'update';
+      title: string;
+      category?: string;
+      details: string;
+      timeLabel: string;
+      timestamp: number;
+      isCompleted?: boolean;
+      focusMinutes?: number;
+    }> = [];
+
+    // 1. Vault Items
+    vaultEntries.forEach(v => {
+      if (v.createdAt >= thresholdMillis) {
+        list.push({
+          id: `${v.id}-created`,
+          source: 'vault',
+          type: 'creation',
+          title: v.title,
+          category: v.category,
+          details: `Secure document created under category "${v.category}".`,
+          timeLabel: new Date(v.createdAt).toLocaleDateString('en-US', { hour: '2-digit', minute: '2-digit', month: 'short', day: 'numeric' }),
+          timestamp: v.createdAt
+        });
+      }
+      if (v.updatedAt >= thresholdMillis && v.updatedAt !== v.createdAt) {
+        list.push({
+          id: `${v.id}-updated`,
+          source: 'vault',
+          type: 'update',
+          title: v.title,
+          category: v.category,
+          details: `Document changes saved - content/list items refreshed.`,
+          timeLabel: new Date(v.updatedAt).toLocaleDateString('en-US', { hour: '2-digit', minute: '2-digit', month: 'short', day: 'numeric' }),
+          timestamp: v.updatedAt
+        });
+      }
+    });
+
+    // 2. Price Articles & Individual quotes
+    priceArticles.forEach(art => {
+      if (art.createdAt >= thresholdMillis) {
+        list.push({
+          id: `${art.id}-created`,
+          source: 'price',
+          type: 'creation',
+          title: art.name,
+          category: art.category,
+          details: `New price catalog article introduced. Initial quote established in category "${art.category}".`,
+          timeLabel: new Date(art.createdAt).toLocaleDateString('en-US', { hour: '2-digit', minute: '2-digit', month: 'short', day: 'numeric' }),
+          timestamp: art.createdAt
+        });
+      } else if (art.updatedAt >= thresholdMillis && art.updatedAt !== art.createdAt) {
+        list.push({
+          id: `${art.id}-updated`,
+          source: 'price',
+          type: 'update',
+          title: art.name,
+          category: art.category,
+          details: `Catalog record modified (or details adjusted).`,
+          timeLabel: new Date(art.updatedAt).toLocaleDateString('en-US', { hour: '2-digit', minute: '2-digit', month: 'short', day: 'numeric' }),
+          timestamp: art.updatedAt
+        });
+      }
+
+      art.records?.forEach(rec => {
+        const recTime = new Date(rec.dateRecorded).getTime();
+        if (recTime >= thresholdMillis) {
+          list.push({
+            id: rec.id,
+            source: 'price',
+            type: 'creation',
+            title: `${art.name} (${rec.location || 'Local'})`,
+            category: 'Price Entry',
+            details: `Posted quote of ${rec.price} ${rec.currency}${rec.unit ? ` per ${rec.unit}` : ''} at ${rec.location || 'specified shop'}.`,
+            timeLabel: new Date(recTime).toLocaleDateString('en-US', { hour: '2-digit', minute: '2-digit', month: 'short', day: 'numeric' }),
+            timestamp: recTime
+          });
+        }
+      });
+    });
+
+    // 3. Daily Activities
+    activities.forEach(act => {
+      if (act.timestamp >= thresholdMillis) {
+        const isCompleted = act.status === 'Completed';
+        const focusMinutes = Math.round((act.timer?.totalElapsed || 0) / 60000);
+        list.push({
+          id: `${act.id}-created`,
+          source: 'activity',
+          type: isCompleted ? 'update' : 'creation',
+          title: act.description,
+          category: act.group,
+          details: isCompleted 
+            ? `Completed daily activity: ${act.description}. Status: ${act.status}.${focusMinutes > 0 ? ` Tracked ${focusMinutes} focus minutes.` : ''}`
+            : `Created daily activity: ${act.description} under standard ${act.group} cycle.${focusMinutes > 0 ? ` Tracked ${focusMinutes} focus minutes.` : ''}`,
+          timeLabel: new Date(act.timestamp).toLocaleDateString('en-US', { hour: '2-digit', minute: '2-digit', month: 'short', day: 'numeric' }),
+          timestamp: act.timestamp,
+          isCompleted,
+          focusMinutes
+        });
+
+        // If there are distractions linked to this activity, add them as slip-up postings!
+        if (act.distractions && Array.isArray(act.distractions)) {
+          act.distractions.forEach((dist, idx) => {
+            const distTime = act.timestamp + (idx * 60000);
+            list.push({
+              id: `${act.id}-distraction-${idx}`,
+              source: 'slipup',
+              type: 'creation',
+              title: `Discipline Slip-up during: ${act.description}`,
+              category: 'Distraction Log',
+              details: typeof dist === 'string' ? dist : (dist as any).description || 'Unspecified distraction',
+              timeLabel: new Date(distTime).toLocaleDateString('en-US', { hour: '2-digit', minute: '2-digit', month: 'short', day: 'numeric' }),
+              timestamp: distTime
+            });
+          });
+        }
+      }
+    });
+
+    // 4. Distraction notes
+    notes.forEach(note => {
+      if (note.createdAt >= thresholdMillis && note.type === 'Distraction') {
+        list.push({
+          id: note.id,
+          source: 'slipup',
+          type: 'creation',
+          title: note.title || 'Distraction Recorded',
+          category: 'Slip-up Note',
+          details: note.content,
+          timeLabel: new Date(note.createdAt).toLocaleDateString('en-US', { hour: '2-digit', minute: '2-digit', month: 'short', day: 'numeric' }),
+          timestamp: note.createdAt
+        });
+      }
+    });
+
+    // 5. Daily reflections with mistake
+    Object.entries(reflectionsMap).forEach(([dateStr, refObj]) => {
+      if (refObj.hasMistake) {
+        const refTime = new Date(dateStr).getTime() + 12 * 60 * 60 * 1000; // approximate as noon of that day
+        if (refTime >= thresholdMillis) {
+          list.push({
+            id: `reflection-mistake-${dateStr}`,
+            source: 'slipup',
+            type: 'creation',
+            title: `Daily Reflection Slip-up (${dateStr})`,
+            category: 'Reflection Slip-up',
+            details: `${refObj.mistakeDescription || 'Recorded leak'}${refObj.timeLostMinutes ? ` (${refObj.timeLostMinutes}m lost)` : ''}. Summary: "${refObj.text}"`,
+            timeLabel: new Date(refTime).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+            timestamp: refTime
+          });
+        }
+      }
+    });
+
+    // Sort descending by timestamp
+    return list.sort((a, b) => b.timestamp - a.timestamp);
+  }, [vaultEntries, priceArticles, activities, notes, reflectionsMap]);
+
+  const filteredPostings = useMemo(() => {
+    if (summaryFilter === 'all') return last3DaysPostings;
+    if (summaryFilter === 'completion') {
+      return last3DaysPostings.filter(log => log.source === 'activity' && log.isCompleted);
+    }
+    if (summaryFilter === 'karma') {
+      return last3DaysPostings.filter(log => log.source === 'activity');
+    }
+    if (summaryFilter === 'focus') {
+      return last3DaysPostings.filter(log => log.source === 'activity' && (log.focusMinutes ?? 0) > 0);
+    }
+    if (summaryFilter === 'slipup') {
+      return last3DaysPostings.filter(log => log.source === 'slipup');
+    }
+    if (summaryFilter === 'vault') {
+      return last3DaysPostings.filter(log => log.source === 'vault');
+    }
+    if (summaryFilter === 'price') {
+      return last3DaysPostings.filter(log => log.source === 'price');
+    }
+    return last3DaysPostings;
+  }, [last3DaysPostings, summaryFilter]);
+
   const getCoachAdvice = async () => {
     setIsAnalyzing(true);
     setCoachResponse(await getProductivityAnalysis(dashboardActivities));
@@ -1416,6 +1804,18 @@ const App: React.FC = () => {
             >
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M3 9h18"/><path d="M9 21V9"/></svg>
               <span>Home</span>
+            </button>
+
+            <button 
+              onClick={() => { setCurrentView('summary'); if (window.innerWidth < 1024) setIsSidebarOpen(false); }} 
+              className={`flex items-center gap-4 py-3.5 px-4 rounded-2xl font-black text-xs uppercase tracking-wider transition-all w-full text-left ${
+                currentView === 'summary' 
+                  ? 'bg-rose-500/10 text-rose-600 dark:bg-rose-500/20 dark:text-rose-400' 
+                  : 'text-stone-500 hover:text-stone-800 dark:text-stone-400 dark:hover:text-stone-100 hover:bg-stone-100/60 dark:hover:bg-stone-900/60'
+              }`}
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M3 3v18h18"/><path d="m18.7 8-5.1 5.2-2.8-2.7L7 14.3" /></svg>
+              <span>Summary Dashboard</span>
             </button>
 
             <button 
@@ -2159,6 +2559,409 @@ const App: React.FC = () => {
               {!coachResponse && !isAnalyzing && <button onClick={getCoachAdvice} className="w-full py-6 bg-[#c25e2d] hover:bg-[#b05023] text-white font-black rounded-2xl transition-all uppercase tracking-widest text-[11px] shadow-md shadow-[#c25e2d]/10">Analyze My Performance</button>}
               {isAnalyzing && <div className="py-20 text-center text-[#c25e2d] animate-pulse font-black uppercase tracking-[0.5em]">Analyzing Patterns...</div>}
               {coachResponse && !isAnalyzing && <div className="p-6 bg-stone-50 rounded-2xl border border-stone-200/60 text-sm text-stone-700 font-medium leading-relaxed whitespace-pre-wrap">{coachResponse}</div>}
+            </div>
+          </div>
+        )}
+
+        {currentView === 'summary' && (
+          <div className="space-y-6 animate-in fade-in duration-500 max-w-5xl mx-auto pb-24">
+            {/* 3-day Retention Protocol Banner */}
+            <div className="glass p-6 rounded-3xl border border-rose-500/10 bg-gradient-to-br from-rose-50/40 via-white to-stone-50 dark:from-rose-950/20 dark:to-stone-900 shadow-sm relative overflow-hidden">
+              <div className="absolute top-0 right-0 w-32 h-32 bg-rose-500/5 rounded-full blur-2xl -mr-8 -mt-8 pointer-events-none" />
+              <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+                <div className="space-y-1">
+                  <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-rose-500/10 text-rose-600 dark:bg-rose-500/20 dark:text-rose-400 text-[9px] font-black tracking-wider uppercase font-mono">
+                    🛡️ Retention Protocol Active
+                  </div>
+                  <h2 className="text-lg font-black text-stone-800 dark:text-stone-100 uppercase tracking-tight">Active 3-Day Focus Window</h2>
+                  <p className="text-xs text-stone-500 dark:text-stone-400 font-medium max-w-2xl leading-relaxed">
+                    To maintain extreme mental clarity and prevent digital hoarding, Karma Chakra strictly implements a zero-clutter **3-day retention policy**. Custom activities, daily logs, and reflection records are stored for precisely 3 days before automatic purging.
+                  </p>
+                </div>
+                <div className="flex flex-col items-end shrink-0 gap-1.5 font-mono">
+                  <span className="text-[10px] text-stone-400">Current Retention Status:</span>
+                  <span className="text-xs font-black text-rose-500 bg-rose-500/5 px-3 py-1 rounded-lg border border-rose-500/20 uppercase tracking-widest">
+                    3 Days Maximum
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Metric Blocks Grid */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-4">
+              <div 
+                className={`glass p-4 rounded-2xl border transition-all duration-305 space-y-1 cursor-pointer select-none hover:scale-[1.02] active:scale-95 ${
+                  summaryFilter === 'completion' 
+                    ? 'border-rose-500 bg-rose-500/5 dark:bg-rose-950/10 shadow-md ring-1 ring-rose-500/20' 
+                    : 'border-stone-200/40 bg-white/95 dark:border-stone-800 dark:bg-stone-900/90 hover:border-rose-500/20'
+                }`}
+                onClick={() => setSummaryFilter(prev => prev === 'completion' ? 'all' : 'completion')}
+                title="Filter by completion status"
+              >
+                <div className="flex justify-between items-start">
+                  <span className="text-[9px] font-black uppercase tracking-wider text-rose-500">Completion</span>
+                  {summaryFilter === 'completion' && <span className="text-[8px] bg-rose-500 text-white font-mono rounded px-1 animate-pulse">Filter</span>}
+                </div>
+                <div className="flex items-baseline gap-1">
+                  <span className="text-xl font-black text-stone-800 dark:text-stone-100">{summaryStats.completionRate}%</span>
+                  <span className="text-[8px] text-stone-400 font-medium font-mono">3-day avg</span>
+                </div>
+                <div className="w-full bg-stone-100 dark:bg-stone-800 h-1 rounded-full overflow-hidden">
+                  <div className="bg-rose-500 h-full rounded-full transition-all duration-500" style={{ width: `${summaryStats.completionRate}%` }} />
+                </div>
+              </div>
+
+              <div 
+                className={`glass p-4 rounded-2xl border transition-all duration-305 space-y-1 cursor-pointer select-none hover:scale-[1.02] active:scale-95 ${
+                  summaryFilter === 'karma' 
+                    ? 'border-[#c25e2d] bg-[#c25e2d]/5 dark:bg-stone-900/90 shadow-md ring-1 ring-[#c25e2d]/20' 
+                    : 'border-stone-200/40 bg-white/95 dark:border-stone-800 dark:bg-stone-900/90 hover:border-[#c25e2d]/20'
+                }`}
+                onClick={() => setSummaryFilter(prev => prev === 'karma' ? 'all' : 'karma')}
+                title="Filter by Daily Activities"
+              >
+                <div className="flex justify-between items-start">
+                  <span className="text-[9px] font-black uppercase tracking-wider text-[#c25e2d]">Karma completed</span>
+                  {summaryFilter === 'karma' && <span className="text-[8px] bg-[#c25e2d] text-white font-mono rounded px-1 animate-pulse">Filter</span>}
+                </div>
+                <div className="flex items-baseline gap-1">
+                  <span className="text-xl font-black text-stone-800 dark:text-stone-100">{summaryStats.completedTasks}</span>
+                  <span className="text-[8.5px] text-stone-400 font-medium font-mono">/ {summaryStats.totalTasks} tasks</span>
+                </div>
+                <p className="text-[9px] text-stone-400 leading-tight">Active tasks in buffer</p>
+              </div>
+
+              <div 
+                className={`glass p-4 rounded-2xl border transition-all duration-305 space-y-1 cursor-pointer select-none hover:scale-[1.02] active:scale-95 ${
+                  summaryFilter === 'focus' 
+                    ? 'border-emerald-600 bg-emerald-500/5 dark:bg-emerald-950/10 shadow-md ring-1 ring-emerald-600/20' 
+                    : 'border-stone-200/40 bg-white/95 dark:border-stone-800 dark:bg-stone-900/90 hover:border-emerald-600/20'
+                }`}
+                onClick={() => setSummaryFilter(prev => prev === 'focus' ? 'all' : 'focus')}
+                title="Filter by focused activities"
+              >
+                <div className="flex justify-between items-start">
+                  <span className="text-[9px] font-black uppercase tracking-wider text-emerald-600">Tracked focus time</span>
+                  {summaryFilter === 'focus' && <span className="text-[8px] bg-emerald-600 text-white font-mono rounded px-1 animate-pulse">Filter</span>}
+                </div>
+                <div className="flex items-baseline gap-1">
+                  <span className="text-xl font-black text-stone-800 dark:text-stone-100">{summaryStats.totalMinutesTracked}</span>
+                  <span className="text-[8.5px] text-stone-400 font-bold font-mono">mins</span>
+                </div>
+                <p className="text-[9px] text-stone-400 leading-tight">Actual timer elapsed</p>
+              </div>
+
+              <div 
+                className={`glass p-4 rounded-2xl border transition-all duration-305 space-y-1 cursor-pointer select-none hover:scale-[1.02] active:scale-95 ${
+                  summaryFilter === 'slipup' 
+                    ? 'border-rose-400 bg-rose-400/5 dark:bg-rose-950/10 shadow-md ring-1 ring-rose-400/20' 
+                    : 'border-stone-200/40 bg-white/95 dark:border-stone-800 dark:bg-stone-900/90 hover:border-rose-400/20'
+                }`}
+                onClick={() => setSummaryFilter(prev => prev === 'slipup' ? 'all' : 'slipup')}
+                title="Filter by discipline slip-ups"
+              >
+                <div className="flex justify-between items-start">
+                  <span className="text-[9px] font-black uppercase tracking-wider text-rose-400">Slip-up logs</span>
+                  {summaryFilter === 'slipup' && <span className="text-[8px] bg-rose-400 text-white font-mono rounded px-1 animate-pulse">Filter</span>}
+                </div>
+                <div className="flex items-baseline gap-1">
+                  <span className="text-xl font-black text-stone-800 dark:text-stone-100">{summaryStats.daysWithMistakes} d</span>
+                  <span className="text-[8.5px] text-stone-400 font-bold font-mono">/ -{summaryStats.totalMinutesLost}m</span>
+                </div>
+                <p className="text-[9px] text-stone-400 leading-tight">Recorded leaks</p>
+              </div>
+
+              <div 
+                className={`glass p-4 rounded-2xl border transition-all duration-305 space-y-1 cursor-pointer select-none hover:scale-[1.02] active:scale-95 ${
+                  summaryFilter === 'vault' 
+                    ? 'border-[#7a523a] dark:border-[#be9b7b] bg-[#7a523a]/5 dark:bg-[#7a523a]/15 shadow-md ring-1 ring-[#7a523a]/20 dark:ring-[#be9b7b]/20' 
+                    : 'border-stone-200/40 bg-white/95 dark:border-stone-800 dark:bg-stone-900/90 hover:border-[#7a523a]/20 dark:hover:border-[#be9b7b]/20'
+                }`}
+                onClick={() => setSummaryFilter(prev => prev === 'vault' ? 'all' : 'vault')}
+                title="Filter by Vault items"
+              >
+                <div className="flex justify-between items-start">
+                  <span className="text-[9px] font-black uppercase tracking-wider text-[#7a523a] dark:text-[#be9b7b] font-mono">Vault items</span>
+                  {summaryFilter === 'vault' && <span className="text-[8px] bg-[#7a523a] text-white font-mono rounded px-1 animate-pulse">Filter</span>}
+                </div>
+                <div className="flex items-baseline gap-1">
+                  <span className="text-xl font-black text-stone-800 dark:text-stone-100">{summaryStats.totalVaultItems}</span>
+                  <span className="text-[8.5px] text-stone-400 font-medium font-mono">docs</span>
+                </div>
+                <p className="text-[9px] text-stone-400 leading-tight">Active documents stored</p>
+              </div>
+
+              <div 
+                className={`glass p-4 rounded-2xl border transition-all duration-305 space-y-1 cursor-pointer select-none hover:scale-[1.02] active:scale-95 ${
+                  summaryFilter === 'price' 
+                    ? 'border-amber-500 bg-amber-500/5 dark:bg-amber-500/10 shadow-md ring-1 ring-amber-500/20' 
+                    : 'border-stone-200/40 bg-white/95 dark:border-stone-800 dark:bg-stone-900/90 hover:border-amber-500/20'
+                }`}
+                onClick={() => setSummaryFilter(prev => prev === 'price' ? 'all' : 'price')}
+                title="Filter by Price records"
+              >
+                <div className="flex justify-between items-start">
+                  <span className="text-[9px] font-black uppercase tracking-wider text-amber-500 font-mono">Price catalog</span>
+                  {summaryFilter === 'price' && <span className="text-[8px] bg-amber-500 text-white font-mono rounded px-1 animate-pulse">Filter</span>}
+                </div>
+                <div className="flex items-baseline gap-1">
+                  <span className="text-xl font-black text-[#2b2925] dark:text-stone-100">{summaryStats.totalPriceRecords}</span>
+                  <span className="text-[8.5px] text-stone-400 font-medium font-mono">/ {summaryStats.totalPriceArticles} items</span>
+                </div>
+                <p className="text-[9px] text-stone-400 leading-tight">Commodity quotations</p>
+              </div>
+            </div>
+
+            {/* Core Panels Grid */}
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+              
+              {/* Left Column: Progress Chart & Action Desk & Log Chronicle */}
+              <div className="lg:col-span-7 space-y-6">
+                
+                {/* 3-day Activity Bar Chart */}
+                <div className="glass p-6 rounded-3xl border border-stone-200/40 bg-white/95 dark:border-stone-800 dark:bg-stone-900/95 shadow-sm space-y-4">
+                  <div>
+                    <h3 className="text-[10px] font-black text-stone-500 uppercase tracking-widest font-mono">3-Day Window Focus Stream</h3>
+                    <p className="text-[10px] text-stone-400">Comparing completed vs pending items chronologically</p>
+                  </div>
+
+                  <div className="h-64 pt-2">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={last3DaysData}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#e4e1d9" vertical={false} />
+                        <XAxis dataKey="label" stroke="#a39d8f" fontSize={10} tickLine={false} axisLine={false} />
+                        <YAxis stroke="#a39d8f" fontSize={10} tickLine={false} axisLine={false} allowDecimals={false} />
+                        <Tooltip 
+                          cursor={{fill: 'rgba(194,94,45,0.03)'}} 
+                          contentStyle={{ backgroundColor: '#faf8f5', border: '1px solid #e4e1d9', borderRadius: '16px' }} 
+                          itemStyle={{ color: '#2b2925', fontSize: '11px' }} 
+                        />
+                        <Bar dataKey="completed" name="Completed Tasks" fill="#2d6a4f" radius={[4, 4, 0, 0]} />
+                        <Bar dataKey="pending" name="Pending Log" fill="#c25e2d" radius={[4, 4, 0, 0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+
+                {/* Real-time Postings Chronicle */}
+                <div className="glass p-6 rounded-3xl border border-stone-200/40 bg-white/95 dark:border-stone-800 dark:bg-stone-900/95 shadow-sm space-y-4">
+                  <div className="border-b border-stone-100 dark:border-stone-800 pb-3 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
+                    <div className="space-y-0.5 text-left">
+                      <h3 className="text-xs font-black text-stone-800 dark:text-stone-200 uppercase tracking-wider font-mono flex items-center gap-1.5">
+                        <span>📋 Real-Time Activity & Postings Chronicle</span>
+                        {summaryFilter !== 'all' && (
+                          <span className="inline-flex h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
+                        )}
+                      </h3>
+                      <p className="text-[10px] text-stone-400 font-medium">Brief summary of changes, item creations, price updates, and daily actions</p>
+                    </div>
+                    {summaryFilter !== 'all' && (
+                      <button 
+                        onClick={() => setSummaryFilter('all')}
+                        className="px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-wider bg-stone-105 hover:bg-stone-200 dark:bg-stone-800 dark:hover:bg-stone-700 text-stone-600 dark:text-stone-300 transition-all flex items-center gap-1 font-mono border border-stone-200/40 dark:border-stone-750 cursor-pointer active:scale-95 self-start"
+                      >
+                        Reset Filter <span className="font-sans text-[10px]">✕</span>
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="max-h-96 overflow-y-auto space-y-2.5 pr-2 scrollbar-thin scrollbar-thumb-stone-200">
+                    {filteredPostings.length > 0 ? (
+                      filteredPostings.map((log) => (
+                        <div 
+                          key={log.id} 
+                          className="p-3 rounded-xl border border-stone-150/50 dark:border-stone-850 bg-stone-50/50 dark:bg-stone-900/50 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 text-left transition-all hover:bg-stone-100/40 dark:hover:bg-stone-900"
+                        >
+                          <div className="space-y-1">
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              {log.source === 'vault' && (
+                                <span className="text-[8px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded bg-[#7a523a]/10 text-[#7a523a] dark:bg-[#7a523a]/25 dark:text-[#be9b7b] font-mono">
+                                  Vault Item
+                                </span>
+                              )}
+                              {log.source === 'price' && (
+                                <span className="text-[8px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-600 dark:bg-amber-500/25 dark:text-amber-400 font-mono">
+                                  Price Catalog
+                                </span>
+                              )}
+                              {log.source === 'activity' && (
+                                <span className="text-[8px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded bg-stone-500/10 text-stone-600 dark:bg-stone-500/25 dark:text-stone-400 font-mono">
+                                  Daily Activity
+                                </span>
+                              )}
+                              {log.source === 'slipup' && (
+                                <span className="text-[8px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded bg-rose-500/10 text-rose-500 dark:bg-rose-500/25 dark:text-rose-400 font-mono">
+                                  Slip-up Log
+                                </span>
+                              )}
+
+                              <span className={`text-[8px] font-black px-1.5 py-0.5 rounded uppercase font-mono ${
+                                log.source === 'slipup'
+                                  ? 'bg-rose-500/15 text-rose-500 dark:bg-rose-500/20 dark:text-rose-300'
+                                  : log.type === 'creation' 
+                                    ? 'bg-emerald-500/10 text-emerald-600 dark:bg-emerald-500/20 dark:text-emerald-400' 
+                                    : 'bg-blue-500/10 text-blue-600 dark:bg-blue-500/20 dark:text-blue-400'
+                              }`}>
+                                {log.source === 'slipup' ? 'LEAK' : log.type}
+                              </span>
+
+                              {log.category && (
+                                <span className="text-[9.5px] text-stone-400 font-bold italic font-mono">(Category: {log.category})</span>
+                              )}
+                            </div>
+
+                            <p className="text-xs font-black text-stone-800 dark:text-stone-200">{log.title}</p>
+                            <p className="text-[10.5px] text-stone-500 dark:text-stone-400 leading-normal font-medium">{log.details}</p>
+                          </div>
+
+                          <div className="sm:text-right shrink-0">
+                            <span className="text-[9.5px] text-stone-400 dark:text-stone-500 font-mono block">{log.timeLabel}</span>
+                          </div>
+                        </div>
+                      ))
+                    ) : (
+                      <div className="py-12 text-center text-[10.5px] tracking-wide text-stone-400 bg-stone-50/50 dark:bg-stone-900/50 rounded-2xl border border-dashed border-stone-200 dark:border-stone-800 max-w-sm mx-auto p-4 leading-normal font-sans">
+                        <span className="text-xl block mb-1">🐚</span>
+                        {summaryFilter !== 'all' ? (
+                          <span>No items in the last 3 days match the active <strong>{summaryFilter}</strong> filter. Tap the active filter tile again or click the Reset button to view all postings!</span>
+                        ) : (
+                          <span>No active recordings posted in the current 3-day buffer window. Create tasks, draft documents in your Vault, or record market commodities in the Price Catalog to build focus karma!</span>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* On-Demand Maintenance Desk */}
+                <div className="glass p-6 rounded-3xl border border-stone-200/40 bg-white/95 dark:border-stone-800 dark:bg-stone-900/95 shadow-sm space-y-4">
+                  <h3 className="text-xs font-black text-stone-700 dark:text-stone-300 uppercase tracking-wider font-mono">Manual Maintenance & Sync</h3>
+                  <p className="text-xs text-stone-500 dark:text-stone-400 leading-relaxed">
+                    The background daemon checks for expired logs older than 72 hours automatically every hour. If you prefer to trigger a deep-clean immediate prune cycle right now, use the action control below.
+                  </p>
+                  <div className="flex flex-wrap gap-3">
+                    <button
+                      onClick={() => {
+                        // Manually trigger the pruner
+                        const prevActCount = activities.length;
+                        const now = new Date();
+                        const d3 = new Date(now.getTime() - 2 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+                        const thresholdDate = d3;
+                        const thresholdTimestamp = now.getTime() - 3 * 24 * 60 * 60 * 1000;
+                        
+                        setActivities(prev => prev.filter(a => a.date ? a.date >= thresholdDate : a.timestamp >= thresholdTimestamp));
+                        setNotes(prev => prev.filter(n => {
+                          if (n.type === 'Journal' || n.type === 'Reflection') {
+                            const noteDay = new Date(n.createdAt).toISOString().split('T')[0];
+                            return noteDay >= thresholdDate && n.createdAt >= thresholdTimestamp;
+                          }
+                          return true;
+                        }));
+                        setReflection(prev => {
+                          try {
+                            if (!prev || !prev.trim()) return prev;
+                            const map = JSON.parse(prev);
+                            if (map && typeof map === 'object' && !Array.isArray(map)) {
+                              const cleanedMap: Record<string, any> = {};
+                              for (const key of Object.keys(map)) {
+                                if (key >= thresholdDate) cleanedMap[key] = map[key];
+                              }
+                              return JSON.stringify(cleanedMap);
+                            }
+                          } catch (e) {}
+                          return prev;
+                        });
+                        alert("Immediate deep-cleaning completed! Stale records successfully purged.");
+                      }}
+                      className="px-4 py-2.5 bg-rose-500 hover:bg-rose-600 text-white font-black text-[10px] uppercase tracking-widest rounded-xl shadow-md transition-all active:scale-95 flex items-center gap-2"
+                    >
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><path d="M3 6h18"/><path d="M19 6V20a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/></svg>
+                      Force Prune Clean Now
+                    </button>
+                    <button
+                      onClick={() => {
+                        setCurrentView('sync');
+                      }}
+                      className="px-4 py-2.5 bg-stone-100 hover:bg-stone-200 dark:bg-stone-800 dark:hover:bg-stone-700 text-stone-700 dark:text-stone-300 font-bold text-[10px] uppercase tracking-widest rounded-xl transition-all"
+                    >
+                      Configure Cloud Backup
+                    </button>
+                  </div>
+                </div>
+
+              </div>
+
+              {/* Right Column: Reflections Timeline & Single Date Journal Records */}
+              <div className="lg:col-span-5 space-y-6">
+                
+                {/* 3-day Timeline Feed */}
+                <div className="glass p-6 rounded-3xl border border-stone-200/40 bg-white/95 dark:border-stone-800 dark:bg-stone-900/95 shadow-sm space-y-4">
+                  <div className="flex items-center justify-between border-b border-stone-100 dark:border-stone-800 pb-3">
+                    <div>
+                      <h3 className="text-xs font-black text-stone-800 dark:text-stone-200 uppercase tracking-tight">Active Days Timeline</h3>
+                      <p className="text-[10px] text-stone-400">Click a day to activate edit mode</p>
+                    </div>
+                    <span className="text-[10px] font-black text-stone-400 font-mono">Timeline Tally</span>
+                  </div>
+
+                  <div className="space-y-6">
+                    {last3DaysData.map((day) => {
+                      const isActiveDate = selectedDate === day.date;
+                      return (
+                        <div key={day.date} className="relative pl-5 border-l-2 border-stone-200/70 dark:border-stone-800 last:border-transparent pb-1">
+                          {/* Dot marker */}
+                          <div className={`absolute left-[-6px] top-1.5 w-3.5 h-3.5 rounded-full border-2 bg-white transition-all ${isActiveDate ? 'border-rose-500 scale-110 shadow-lg' : 'border-stone-300'}`} />
+                          
+                          <div className="space-y-2">
+                            <div className="flex items-center justify-between">
+                              <button 
+                                onClick={() => {
+                                  setSelectedDate(day.date);
+                                  setCurrentView('dashboard');
+                                }}
+                                className="text-left font-black text-xs text-stone-800 dark:text-stone-100 hover:text-[#c25e2d] transition-all flex items-center gap-1.5"
+                              >
+                                {day.label} 
+                                {isActiveDate && <span className="text-[8px] bg-emerald-500 text-white px-1 rounded-sm uppercase tracking-wide">Selected</span>}
+                              </button>
+                              <span className="text-[10.5px] font-mono text-stone-500">{day.completed} / {day.total} Done</span>
+                            </div>
+
+                            {/* Reflection text / journal box */}
+                            <div className="p-3 rounded-xl bg-stone-50 dark:bg-stone-950/70 border border-stone-150 dark:border-stone-850 space-y-2.5">
+                              {day.reflectionText ? (
+                                <p className="text-[11px] text-stone-600 dark:text-stone-400 font-medium italic leading-relaxed whitespace-pre-line text-left">
+                                  "{day.reflectionText}"
+                                </p>
+                              ) : (
+                                <p className="text-[10px] text-stone-400 font-bold uppercase tracking-widest text-center py-2 italic">
+                                  No reflection entered for this date
+                                </p>
+                              )}
+
+                              {/* Mistake highlights */}
+                              {day.hasMistake ? (
+                                <div className="p-2 rounded-lg bg-rose-50 border border-rose-100 space-y-1">
+                                  <div className="flex items-center justify-between">
+                                    <span className="text-[8.5px] font-black text-rose-500 uppercase tracking-widest font-mono">⚠️ Discipline Slip</span>
+                                    <span className="text-[9px] font-black text-rose-600 font-mono">-{day.timeLost} mins lost</span>
+                                  </div>
+                                  <p className="text-[10px] text-stone-600 dark:text-stone-700 font-bold leading-normal text-left">{day.mistakeDescription || "Time Leak detected"}</p>
+                                </div>
+                              ) : day.reflectionText && (
+                                <div className="text-[8.5px] font-black text-emerald-500 uppercase tracking-widest font-mono text-right">
+                                  ✓ Clear Day (No documented slip-ups)
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+              </div>
+
             </div>
           </div>
         )}
