@@ -12,6 +12,24 @@ export const getSupabaseConfig = () => {
 export const saveSupabaseConfig = (url: string, key: string) => {
   localStorage.setItem('karma_chakra_supabase_url', url);
   localStorage.setItem('karma_chakra_supabase_key', key);
+  try {
+    const dbRequest = indexedDB.open('KarmaChakraPersistentStorage', 1);
+    dbRequest.onupgradeneeded = (e: any) => {
+      const db = e.target.result;
+      if (!db.objectStoreNames.contains('keyvalue')) {
+        db.createObjectStore('keyvalue');
+      }
+    };
+    dbRequest.onsuccess = (e: any) => {
+      const db = e.target.result;
+      const transaction = db.transaction('keyvalue', 'readwrite');
+      const store = transaction.objectStore('keyvalue');
+      store.put(url, 'karma_chakra_supabase_url');
+      store.put(key, 'karma_chakra_supabase_key');
+    };
+  } catch (err) {
+    console.error('Failed to write credentials to IndexedDB persistent storage:', err);
+  }
   supabaseInstance = null; // Reset cached client on credentials change
 };
 
@@ -28,6 +46,63 @@ export const getSupabaseClient = (): SupabaseClient | null => {
       auth: {
         persistSession: true,
         autoRefreshToken: true,
+        storage: {
+          getItem: (k) => localStorage.getItem(k),
+          setItem: (k, v) => {
+            localStorage.setItem(k, v);
+            try {
+              const dbRequest = indexedDB.open('KarmaChakraPersistentStorage', 1);
+              dbRequest.onupgradeneeded = (e: any) => {
+                const db = e.target.result;
+                if (!db.objectStoreNames.contains('keyvalue')) {
+                  db.createObjectStore('keyvalue');
+                }
+              };
+              dbRequest.onsuccess = (e: any) => {
+                const db = e.target.result;
+                const transaction = db.transaction('keyvalue', 'readwrite');
+                const store = transaction.objectStore('keyvalue');
+                store.put(v, k);
+                
+                transaction.oncomplete = () => {
+                  db.close();
+                };
+                transaction.onerror = () => {
+                  db.close();
+                };
+              };
+              dbRequest.onerror = () => {
+                console.error('IndexedDB open error in Supabase storage setItem');
+              };
+            } catch (err) {
+              console.error('Failed to write Supabase auth to IndexedDB persistent storage:', err);
+            }
+          },
+          removeItem: (k) => {
+            localStorage.removeItem(k);
+            try {
+              const dbRequest = indexedDB.open('KarmaChakraPersistentStorage', 1);
+              dbRequest.onsuccess = (e: any) => {
+                const db = e.target.result;
+                const transaction = db.transaction('keyvalue', 'readwrite');
+                const store = transaction.objectStore('keyvalue');
+                store.delete(k);
+                
+                transaction.oncomplete = () => {
+                  db.close();
+                };
+                transaction.onerror = () => {
+                  db.close();
+                };
+              };
+              dbRequest.onerror = () => {
+                console.error('IndexedDB open error in Supabase storage removeItem');
+              };
+            } catch (err) {
+              console.error('Failed to delete Supabase auth from IndexedDB persistent storage:', err);
+            }
+          }
+        }
       },
     });
     return supabaseInstance;

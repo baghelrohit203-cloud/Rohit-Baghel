@@ -59,6 +59,36 @@ import {
   supabaseDeleteFile
 } from './services/supabaseService';
 
+const persistToIndexedDB = (key: string, value: string) => {
+  try {
+    const dbRequest = indexedDB.open('KarmaChakraPersistentStorage', 1);
+    dbRequest.onupgradeneeded = (e: any) => {
+      const db = e.target.result;
+      if (!db.objectStoreNames.contains('keyvalue')) {
+        db.createObjectStore('keyvalue');
+      }
+    };
+    dbRequest.onsuccess = (e: any) => {
+      const db = e.target.result;
+      const transaction = db.transaction('keyvalue', 'readwrite');
+      const store = transaction.objectStore('keyvalue');
+      store.put(value, key);
+      
+      transaction.oncomplete = () => {
+        db.close();
+      };
+      transaction.onerror = () => {
+        db.close();
+      };
+    };
+    dbRequest.onerror = () => {
+      console.error('IndexedDB open error in persistToIndexedDB');
+    };
+  } catch (err) {
+    console.error('Failed to write to IndexedDB persistent storage:', err);
+  }
+};
+
 const App: React.FC = () => {
   const [activities, setActivities] = useState<ActivityEntry[]>(() => {
     try {
@@ -188,6 +218,7 @@ const App: React.FC = () => {
   const [authSuccess, setAuthSuccess] = useState('');
   const [isSignUpMode, setIsSignUpMode] = useState(false);
   const [migrationStatus, setMigrationStatus] = useState('');
+  const [isHydrated, setIsHydrated] = useState(false);
   const subscriptionUnsubscribersRef = useRef<(() => void)[]>([]);
 
   // Refs to prevent stale closures in Auth/Sync events
@@ -260,12 +291,108 @@ const App: React.FC = () => {
     setDeferredPrompt(null);
   };
 
+  // Load data from persistent IndexedDB fallback on mount (essential for Capacitor/WebView environments where localStorage is volatile)
+  useEffect(() => {
+    const restoreFromIndexedDB = async () => {
+      try {
+        const dbRequest = indexedDB.open('KarmaChakraPersistentStorage', 1);
+        dbRequest.onupgradeneeded = (e: any) => {
+          const db = e.target.result;
+          if (!db.objectStoreNames.contains('keyvalue')) {
+            db.createObjectStore('keyvalue');
+          }
+        };
+        dbRequest.onsuccess = (e: any) => {
+          const db = e.target.result;
+          const transaction = db.transaction('keyvalue', 'readonly');
+          const store = transaction.objectStore('keyvalue');
+          
+          // Dynamically read ALL keys and values from IndexedDB
+          const keysReq = store.getAllKeys();
+          const valsReq = store.getAll();
+          
+          keysReq.onsuccess = () => {
+            valsReq.onsuccess = () => {
+              const keys = keysReq.result || [];
+              const values = valsReq.result || [];
+              
+              // Load everything into localStorage so it is available synchronously immediately
+              keys.forEach((key: string, idx: number) => {
+                const val = values[idx];
+                if (val !== undefined && val !== null) {
+                  localStorage.setItem(key, val);
+                }
+              });
+              
+              // Extract and restore core states safely
+              const getVal = (k: string, defaultVal: any, isJson = false) => {
+                const val = localStorage.getItem(k);
+                if (val !== undefined && val !== null) {
+                  if (isJson) {
+                    try { return JSON.parse(val); } catch (err) { return defaultVal; }
+                  }
+                  return val;
+                }
+                return defaultVal;
+              };
+
+              const loadedActivities = getVal('karma_chakra_v7_activities', [], true);
+              const loadedNotes = getVal('karma_chakra_v7_notes', [], true);
+              const loadedGoals = getVal('karma_chakra_v7_goals', [], true);
+              const loadedVault = getVal('karma_chakra_v7_vault_entries', [], true);
+              const loadedPrices = getVal('karma_chakra_v7_price_articles', [], true);
+              const loadedReflection = getVal('karma_chakra_v7_reflection', '');
+              const loadedUrl = getVal('karma_chakra_supabase_url', 'https://igzwmydbmxlruocfgnmo.supabase.co');
+              const loadedKey = getVal('karma_chakra_supabase_key', 'sb_publishable_yXH0OAkw6HE15lxEKvdozw_LGENqiNs');
+              const loadedProvider = getVal('karma_chakra_sync_provider', 'supabase');
+              const loadedDarkMode = getVal('karma_chakra_dark_mode', 'false') === 'true';
+              const loadedSidebar = getVal('karma_chakra_sidebar_open', String(window.innerWidth >= 1024)) === 'true';
+
+              // Sync state caches
+              setActivities(loadedActivities);
+              setNotes(loadedNotes);
+              setGoals(loadedGoals);
+              setVaultEntries(loadedVault);
+              setPriceArticles(loadedPrices);
+              setReflection(loadedReflection);
+              setSupabaseUrl(loadedUrl);
+              setSupabaseKey(loadedKey);
+              setSyncProvider(loadedProvider as any);
+              setIsDark(loadedDarkMode);
+              setIsSidebarOpen(loadedSidebar);
+
+              // Set isHydrated to true to enable clean auto-saving
+              setIsHydrated(true);
+              console.log('Dual-Engine Persistent Storage hydrated successfully.');
+            };
+          };
+
+          keysReq.onerror = () => setIsHydrated(true);
+          valsReq.onerror = () => setIsHydrated(true);
+
+          transaction.oncomplete = () => {
+            db.close();
+          };
+          transaction.onerror = () => {
+            db.close();
+          };
+        };
+        dbRequest.onerror = () => setIsHydrated(true);
+      } catch (err) {
+        console.error('Failed to restore from IndexedDB persistent fallback:', err);
+        setIsHydrated(true);
+      }
+    };
+    restoreFromIndexedDB();
+  }, []);
+
   const audioContextRef = useRef<AudioContext | null>(null);
   const alarmIntervalRef = useRef<number | null>(null);
 
   useEffect(() => {
+    if (!isHydrated) return;
     localStorage.setItem('karma_chakra_sidebar_open', String(isSidebarOpen));
-  }, [isSidebarOpen]);
+  }, [isSidebarOpen, isHydrated]);
 
   useEffect(() => {
     if (isDark) {
@@ -273,12 +400,13 @@ const App: React.FC = () => {
     } else {
       document.body.classList.remove('dark');
     }
+    if (!isHydrated) return;
     localStorage.setItem('karma_chakra_dark_mode', String(isDark));
     const themeColorMeta = document.querySelector('meta[name="theme-color"]');
     if (themeColorMeta) {
       themeColorMeta.setAttribute('content', isDark ? '#0a0a0a' : '#f5f2ea');
     }
-  }, [isDark]);
+  }, [isDark, isHydrated]);
 
   useEffect(() => {
     const timer = setInterval(() => setCurrentTime(new Date()), 1000);
@@ -287,6 +415,7 @@ const App: React.FC = () => {
 
   // 3-day automatic cleanup after state is initially hydrated
   useEffect(() => {
+    if (!isHydrated) return;
     const runCleanup = () => {
       const now = new Date();
       // Calculate local date strings for exactly the last 3 days
@@ -403,7 +532,7 @@ const App: React.FC = () => {
       clearTimeout(initialTimer);
       clearInterval(periodicTimer);
     };
-  }, [currentUser, syncProvider]);
+  }, [currentUser, syncProvider, isHydrated]);
 
   // Listen for Supabase user auth changes and handle real-time sync subscription
   useEffect(() => {
@@ -666,23 +795,33 @@ const App: React.FC = () => {
   }, [supabaseUrl, supabaseKey]);
 
   useEffect(() => {
+    if (!isHydrated) return;
     localStorage.setItem('karma_chakra_sync_provider', 'supabase');
-  }, []);
+    persistToIndexedDB('karma_chakra_sync_provider', 'supabase');
+  }, [isHydrated]);
 
   useEffect(() => {
+    if (!isHydrated) return;
     localStorage.setItem('karma_chakra_v7_activities', JSON.stringify(activities));
-  }, [activities]);
+    persistToIndexedDB('karma_chakra_v7_activities', JSON.stringify(activities));
+  }, [activities, isHydrated]);
 
   useEffect(() => {
+    if (!isHydrated) return;
     localStorage.setItem('karma_chakra_v7_notes', JSON.stringify(notes));
-  }, [notes]);
+    persistToIndexedDB('karma_chakra_v7_notes', JSON.stringify(notes));
+  }, [notes, isHydrated]);
 
   useEffect(() => {
+    if (!isHydrated) return;
     localStorage.setItem('karma_chakra_v7_goals', JSON.stringify(goals));
-  }, [goals]);
+    persistToIndexedDB('karma_chakra_v7_goals', JSON.stringify(goals));
+  }, [goals, isHydrated]);
 
   useEffect(() => {
+    if (!isHydrated) return;
     localStorage.setItem('karma_chakra_v7_reflection', reflection);
+    persistToIndexedDB('karma_chakra_v7_reflection', reflection);
     if (currentUser) {
       if (syncProvider === 'supabase') {
         supabaseSaveReflection(currentUser.uid, reflection);
@@ -690,15 +829,45 @@ const App: React.FC = () => {
         cloudSaveReflection(currentUser.uid, reflection);
       }
     }
-  }, [reflection]);
+  }, [reflection, isHydrated]);
 
   useEffect(() => {
+    if (!isHydrated) return;
     localStorage.setItem('karma_chakra_v7_vault_entries', JSON.stringify(vaultEntries));
-  }, [vaultEntries]);
+    persistToIndexedDB('karma_chakra_v7_vault_entries', JSON.stringify(vaultEntries));
+  }, [vaultEntries, isHydrated]);
 
   useEffect(() => {
+    if (!isHydrated) return;
     localStorage.setItem('karma_chakra_v7_price_articles', JSON.stringify(priceArticles));
-  }, [priceArticles]);
+    persistToIndexedDB('karma_chakra_v7_price_articles', JSON.stringify(priceArticles));
+  }, [priceArticles, isHydrated]);
+
+  // Debounced Automatic cloud save/synchronization of local changes to Supabase
+  useEffect(() => {
+    if (!isHydrated || !currentUser || syncProvider !== 'supabase') return;
+
+    const delayTimer = setTimeout(async () => {
+      try {
+        console.log("Auto-sync: Saving local modifications directly to Supabase cloud...");
+        setIsSyncing(true);
+        setSyncStatusText("Saving changes...");
+        await uploadLocalDataToSupabase(
+          currentUser.uid,
+          { activities, notes, goals, reflection, vaultEntries, priceArticles },
+          (statusText) => console.log(statusText)
+        );
+        setIsSyncing(false);
+        setSyncStatusText("Synchronized");
+      } catch (err) {
+        console.error("Auto background sync failure:", err);
+        setIsSyncing(false);
+        setSyncStatusText("Offline Mode (Local Cache)");
+      }
+    }, 1500);
+
+    return () => clearTimeout(delayTimer);
+  }, [isHydrated, currentUser?.uid, activities, notes, goals, reflection, vaultEntries, priceArticles, syncProvider]);
 
   // Automatic calculation and synchronization of unique Content Index
   const computedIndexes = useMemo(() => {
@@ -1746,6 +1915,13 @@ const App: React.FC = () => {
     setIsAnalyzing(false);
   };
 
+  const handleTileClick = (filterType: 'completion' | 'karma' | 'focus' | 'slipup' | 'vault' | 'price') => {
+    setSummaryFilter(prev => prev === filterType ? 'all' : filterType);
+    setTimeout(() => {
+      document.getElementById('realtime-chronicle')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 80);
+  };
+
   const formatMs = (ms: number) => {
     const s = Math.floor(ms / 1000);
     const min = Math.floor(s / 60);
@@ -2595,7 +2771,7 @@ const App: React.FC = () => {
                     ? 'border-rose-500 bg-rose-500/5 dark:bg-rose-950/10 shadow-md ring-1 ring-rose-500/20' 
                     : 'border-stone-200/40 bg-white/95 dark:border-stone-800 dark:bg-stone-900/90 hover:border-rose-500/20'
                 }`}
-                onClick={() => setSummaryFilter(prev => prev === 'completion' ? 'all' : 'completion')}
+                onClick={() => handleTileClick('completion')}
                 title="Filter by completion status"
               >
                 <div className="flex justify-between items-start">
@@ -2617,7 +2793,7 @@ const App: React.FC = () => {
                     ? 'border-[#c25e2d] bg-[#c25e2d]/5 dark:bg-stone-900/90 shadow-md ring-1 ring-[#c25e2d]/20' 
                     : 'border-stone-200/40 bg-white/95 dark:border-stone-800 dark:bg-stone-900/90 hover:border-[#c25e2d]/20'
                 }`}
-                onClick={() => setSummaryFilter(prev => prev === 'karma' ? 'all' : 'karma')}
+                onClick={() => handleTileClick('karma')}
                 title="Filter by Daily Activities"
               >
                 <div className="flex justify-between items-start">
@@ -2637,7 +2813,7 @@ const App: React.FC = () => {
                     ? 'border-emerald-600 bg-emerald-500/5 dark:bg-emerald-950/10 shadow-md ring-1 ring-emerald-600/20' 
                     : 'border-stone-200/40 bg-white/95 dark:border-stone-800 dark:bg-stone-900/90 hover:border-emerald-600/20'
                 }`}
-                onClick={() => setSummaryFilter(prev => prev === 'focus' ? 'all' : 'focus')}
+                onClick={() => handleTileClick('focus')}
                 title="Filter by focused activities"
               >
                 <div className="flex justify-between items-start">
@@ -2657,7 +2833,7 @@ const App: React.FC = () => {
                     ? 'border-rose-400 bg-rose-400/5 dark:bg-rose-950/10 shadow-md ring-1 ring-rose-400/20' 
                     : 'border-stone-200/40 bg-white/95 dark:border-stone-800 dark:bg-stone-900/90 hover:border-rose-400/20'
                 }`}
-                onClick={() => setSummaryFilter(prev => prev === 'slipup' ? 'all' : 'slipup')}
+                onClick={() => handleTileClick('slipup')}
                 title="Filter by discipline slip-ups"
               >
                 <div className="flex justify-between items-start">
@@ -2677,7 +2853,7 @@ const App: React.FC = () => {
                     ? 'border-[#7a523a] dark:border-[#be9b7b] bg-[#7a523a]/5 dark:bg-[#7a523a]/15 shadow-md ring-1 ring-[#7a523a]/20 dark:ring-[#be9b7b]/20' 
                     : 'border-stone-200/40 bg-white/95 dark:border-stone-800 dark:bg-stone-900/90 hover:border-[#7a523a]/20 dark:hover:border-[#be9b7b]/20'
                 }`}
-                onClick={() => setSummaryFilter(prev => prev === 'vault' ? 'all' : 'vault')}
+                onClick={() => handleTileClick('vault')}
                 title="Filter by Vault items"
               >
                 <div className="flex justify-between items-start">
@@ -2697,7 +2873,7 @@ const App: React.FC = () => {
                     ? 'border-amber-500 bg-amber-500/5 dark:bg-amber-500/10 shadow-md ring-1 ring-amber-500/20' 
                     : 'border-stone-200/40 bg-white/95 dark:border-stone-800 dark:bg-stone-900/90 hover:border-amber-500/20'
                 }`}
-                onClick={() => setSummaryFilter(prev => prev === 'price' ? 'all' : 'price')}
+                onClick={() => handleTileClick('price')}
                 title="Filter by Price records"
               >
                 <div className="flex justify-between items-start">
@@ -2744,7 +2920,7 @@ const App: React.FC = () => {
                 </div>
 
                 {/* Real-time Postings Chronicle */}
-                <div className="glass p-6 rounded-3xl border border-stone-200/40 bg-white/95 dark:border-stone-800 dark:bg-stone-900/95 shadow-sm space-y-4">
+                <div id="realtime-chronicle" className="glass p-6 rounded-3xl border border-stone-200/40 bg-white/95 dark:border-stone-800 dark:bg-stone-900/95 shadow-sm space-y-4">
                   <div className="border-b border-stone-100 dark:border-stone-800 pb-3 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
                     <div className="space-y-0.5 text-left">
                       <h3 className="text-xs font-black text-stone-800 dark:text-stone-200 uppercase tracking-wider font-mono flex items-center gap-1.5">
@@ -3103,43 +3279,19 @@ const App: React.FC = () => {
                     </div>
 
                     <div className="space-y-4">
-                      <h3 className="text-xs font-black uppercase text-stone-400 tracking-widest">Database Migrations</h3>
+                      <h3 className="text-xs font-black uppercase text-stone-400 tracking-widest">Database Sync Server Status</h3>
                       
-                      {activities.length > 0 || notes.length > 0 || priceArticles.length > 0 ? (
-                        <div className="p-4 rounded-2xl bg-stone-50 dark:bg-[#1a141c] border border-stone-200/40 dark:border-stone-800/80 space-y-3">
-                          <p className="text-xs font-semibold leading-relaxed text-stone-600 dark:text-stone-300">
-                            You have <strong className="text-emerald-600 font-extrabold">{activities.length}</strong> activities, <strong className="text-emerald-600 font-extrabold">{notes.length}</strong> scribe notes, and <strong className="text-emerald-600 font-extrabold">{priceArticles.length}</strong> watches stored locally. Move them to your clean Supabase tables instantly.
+                      <div className="p-4 rounded-2xl bg-emerald-50/50 dark:bg-emerald-950/10 border border-emerald-500/10 flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-full bg-emerald-500/10 text-emerald-500 flex items-center justify-center text-sm font-black">
+                          ✓
+                        </div>
+                        <div className="space-y-0.5">
+                          <p className="text-xs font-black text-emerald-600 dark:text-emerald-400">Automatic Cloud Backup is Active</p>
+                          <p className="text-[10px] text-stone-500 dark:text-stone-400 leading-relaxed">
+                            Your activities, notes, goals, and Dharma Vault entries are synchronized automatically in real-time. No manual updates or merge button clicking required!
                           </p>
-                          <button 
-                            onClick={async () => {
-                              setMigrationStatus('Upserting state variables to Supabase...');
-                              try {
-                                await uploadLocalDataToSupabase(
-                                  currentUser.uid,
-                                  { activities, notes, goals, reflection, vaultEntries, priceArticles },
-                                  (txt) => setMigrationStatus(txt)
-                                );
-                                setTimeout(() => setMigrationStatus(''), 6000);
-                              } catch (err: any) {
-                                setMigrationStatus('Supabase migration failed: ' + err.message);
-                              }
-                            }}
-                            className="w-full py-3.5 bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs uppercase tracking-wider rounded-xl transition-all shadow-md shadow-emerald-600/10"
-                          >
-                            Migrate Local Data to Supabase Table Index
-                          </button>
                         </div>
-                      ) : (
-                        <div className="p-4 rounded-2xl bg-emerald-50/50 dark:bg-emerald-950/20 border border-emerald-100 text-xs font-semibold text-emerald-800 leading-relaxed">
-                          Your cache database is perfectly empty or already fully uploaded to Supabase Relational tables!
-                        </div>
-                      )}
-
-                      {migrationStatus && (
-                        <div className="p-4 rounded-xl bg-emerald-50 dark:bg-emerald-950/20 text-emerald-600 border border-emerald-100 text-xs font-bold leading-relaxed">
-                          {migrationStatus}
-                        </div>
-                      )}
+                      </div>
                     </div>
 
                     <div className="pt-4 border-t border-stone-100 dark:border-stone-900 flex justify-between items-center">
