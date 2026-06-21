@@ -843,32 +843,6 @@ const App: React.FC = () => {
     persistToIndexedDB('karma_chakra_v7_price_articles', JSON.stringify(priceArticles));
   }, [priceArticles, isHydrated]);
 
-  // Debounced Automatic cloud save/synchronization of local changes to Supabase
-  useEffect(() => {
-    if (!isHydrated || !currentUser || syncProvider !== 'supabase') return;
-
-    const delayTimer = setTimeout(async () => {
-      try {
-        console.log("Auto-sync: Saving local modifications directly to Supabase cloud...");
-        setIsSyncing(true);
-        setSyncStatusText("Saving changes...");
-        await uploadLocalDataToSupabase(
-          currentUser.uid,
-          { activities, notes, goals, reflection, vaultEntries, priceArticles },
-          (statusText) => console.log(statusText)
-        );
-        setIsSyncing(false);
-        setSyncStatusText("Synchronized");
-      } catch (err) {
-        console.error("Auto background sync failure:", err);
-        setIsSyncing(false);
-        setSyncStatusText("Offline Mode (Local Cache)");
-      }
-    }, 1500);
-
-    return () => clearTimeout(delayTimer);
-  }, [isHydrated, currentUser?.uid, activities, notes, goals, reflection, vaultEntries, priceArticles, syncProvider]);
-
   // Automatic calculation and synchronization of unique Content Index
   const computedIndexes = useMemo(() => {
     const sortedVault = [...vaultEntries].sort((a, b) => a.createdAt - b.createdAt);

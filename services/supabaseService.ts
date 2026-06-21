@@ -712,6 +712,23 @@ export const subscribeToSupabaseCollections = (
 
   pullInitialData();
 
+  // Listen for window focus/visibility change to automatically re-sync when app resumes or is focused on mobile/desktop
+  const handleVisibilityOrFocus = () => {
+    if (document.visibilityState === 'visible') {
+      console.log('Window focused or visible: triggering Supabase data pull...');
+      pullInitialData();
+    }
+  };
+  
+  window.addEventListener('focus', handleVisibilityOrFocus);
+  document.addEventListener('visibilitychange', handleVisibilityOrFocus);
+
+  // Periodic polling fallback (every 25 seconds) to ensure real-time consistency even if real-time stream is disconnected/throttled
+  const pollInterval = setInterval(() => {
+    console.log('Periodic polling active: refreshing Supabase tables...');
+    pullInitialData();
+  }, 25000);
+
   // Create Postgres changes subscriptions for user's tables (useful if tables have CDC enabled)
   const uniqueChannelName = `supabase-sync-${userId}-${Math.random().toString(36).substring(2, 10)}`;
   const channel = client
@@ -740,6 +757,9 @@ export const subscribeToSupabaseCollections = (
 
   return [() => {
     client.removeChannel(channel);
+    window.removeEventListener('focus', handleVisibilityOrFocus);
+    document.removeEventListener('visibilitychange', handleVisibilityOrFocus);
+    clearInterval(pollInterval);
   }];
 };
 
